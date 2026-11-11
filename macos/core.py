@@ -238,11 +238,16 @@ class Store:
 
     def notifications(self, at):
         options = self.options
-        events = self.events(at.strftime('%Y-%m'))
+        current=at.strftime('%Y-%m')
+        events = self.events(current)
+        next_month=(at+timedelta(hours=1)).strftime('%Y-%m')
+        if next_month!=current:
+            events=list({e['id']:e for e in events+self.events(next_month)}.values())
         delivered = set(self.data['delivered'])
         alerts = []
         today = at.strftime('%Y-%m-%d')
-        if options['daily_summary'] and at.strftime('%H:%M') == options['summary_time'] and self.data['summary_checked'] != today:
+        summary_ready=current in self.data['months'] or not options['auto_sync']
+        if summary_ready and options['daily_summary'] and at.strftime('%H:%M') == options['summary_time'] and self.data['summary_checked'] != today:
             self.data['summary_checked'] = today
             todays = [e for e in events if e['date'] == today]
             if todays:

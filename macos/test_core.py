@@ -93,6 +93,19 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len(alerts),1); self.assertIn('53분',alerts[0]['title'])
         self.store.acknowledge(alerts[0]); self.assertEqual(self.store.notifications(at),[])
 
+    def test_hour_reminder_crosses_month(self):
+        self.store.options.update(hour_reminders=True,daily_summary=False)
+        event={**self.store.events('2026-11')[0],'id':'next-month','uid':'next-month','date':'2026-12-01','start':'2026-12-01T00:15:00+09:00','allDay':False}
+        self.store.data['months']['2026-12']={'events':[event]}
+        alerts=self.store.notifications(datetime(2026,11,30,23,30,tzinfo=SEOUL))
+        self.assertEqual(len(alerts),1); self.assertIn('45분',alerts[0]['title'])
+
+    def test_missing_cache_does_not_consume_summary_before_sync(self):
+        self.store.options.update(auto_sync=True,daily_summary=True,summary_time='09:00',hour_reminders=False)
+        self.store.data['months'].clear()
+        self.assertEqual(self.store.notifications(datetime(2026,11,2,9,0,tzinfo=SEOUL)),[])
+        self.assertEqual(self.store.data['summary_checked'],'')
+
     def test_empty_or_wrong_month_is_not_success(self):
         with self.assertRaises(ValueError): parse_snapshot({'month':'2026-11','cells':[]},'2026-11',{})
 

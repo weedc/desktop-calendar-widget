@@ -357,7 +357,7 @@ class CalendarWindow(QWidget):
         self.setWindowTitle('팀 캘린더 위젯'); self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(700,410); self.setMouseTracking(True)
         self.setGeometry(*store.data['geometry']); self.pool = QThreadPool(self); self.pool.setMaxThreadCount(1)
-        self.busy = False; self.pending = []; self.last_attempt = 0.0; self.status = '저장된 일정'; self.hits = []
+        self.busy = False; self.pending = []; self.last_attempt = 0.0; self.month_attempts={}; self.status = '저장된 일정'; self.hits = []
         self.detail = DayDetails(self); self.settings_window = None; self.grip = QSizeGrip(self)
         self.header = QWidget(self); self.header.setStyleSheet('background:transparent;')
         row = QHBoxLayout(self.header); row.setContentsMargins(0,0,0,0); row.setSpacing(0)
@@ -433,6 +433,7 @@ class CalendarWindow(QWidget):
         sources=copy.deepcopy(self.store.sources()); email=self.store.options['account_email']
         if not any(s.get('enabled',True) for s in sources): self.status='표시할 캘린더가 없습니다'; self.update(); return
         self.busy=True; self.last_attempt=time.monotonic(); self.status='Google Calendar 읽는 중…'; self.update()
+        self.month_attempts[month]=self.last_attempt
         # Snapshot source identity: don't merge an old mode into a newly selected mode.
         mode=self.store.options['mode']
         def finished(result):
@@ -450,6 +451,11 @@ class CalendarWindow(QWidget):
     def tick(self):
         if self.demo: return
         at=now(); current=at.strftime('%Y-%m')
+        if self.store.options['auto_sync']:
+            needed={current,(at+timedelta(hours=1)).strftime('%Y-%m')}
+            for month in sorted(needed):
+                if month not in self.store.data['months'] and time.monotonic()-self.month_attempts.get(month,-3600)>=3600 and month not in [p[0] for p in self.pending]:
+                    self.request_month(month,automatic=True)
         if self.store.options['auto_sync'] and time.monotonic()-self.last_attempt>=3600:
             self.request_month(self.month,automatic=True)
             if current!=self.month and current not in [p[0] for p in self.pending]: self.pending.append((current,True))
