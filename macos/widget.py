@@ -363,7 +363,8 @@ class CalendarWindow(QWidget):
         row = QHBoxLayout(self.header); row.setContentsMargins(0,0,0,0); row.setSpacing(0)
         for title, function in [('‹',lambda:self.move_month(-1)),('오늘',self.today),('›',lambda:self.move_month(1)),('↻',self.refresh),('↗',self.open_google),('⋯',self.settings),('─',self.hide)]:
             control=button(title,function,row); control.setStyleSheet('QPushButton {background:transparent; padding:4px 7px; border:0;} QPushButton:hover {background:#426372;}')
-        self.tray = QSystemTrayIcon(self.icon(),self)
+        self.app_icon=self.icon(); self.setWindowIcon(self.app_icon)
+        self.tray = QSystemTrayIcon(self.app_icon,self)
         menu = QMenu()
         for title, function in [('보이기 / 숨기기',self.toggle),('새로고침',self.refresh),('설정',self.settings),('Codex · Dot 연동',self.codex_dialog)]: menu.addAction(title,function)
         self.pin_action = menu.addAction('바탕화면에 붙이기'); self.pin_action.setCheckable(True); self.pin_action.triggered.connect(self.toggle_pin)
@@ -521,13 +522,15 @@ class CalendarWindow(QWidget):
         p.fillRect(0,0,self.width(),35,QColor('#172f3c'))
         p.setPen(QColor('#d9eaf0')); p.setFont(QFont('Arial',11))
         title=' · '.join(s['name'] for s in self.store.sources() if s.get('enabled',True))
-        p.drawText(QRectF(12,0,min(270,self.width()/3),34),Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText('▦  '+title,Qt.TextElideMode.ElideRight,int(min(260,self.width()/3))))
+        p.drawPixmap(10,10,self.app_icon.pixmap(15,15))
+        p.drawText(QRectF(32,0,min(250,self.width()/3),34),Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(title,Qt.TextElideMode.ElideRight,int(min(240,self.width()/3))))
         p.setFont(QFont('Arial',12,QFont.Weight.Bold)); p.drawText(QRectF(self.width()/2-110,0,220,34),Qt.AlignmentFlag.AlignCenter,self.month[:4]+'년 '+str(int(self.month[5:]))+'월')
-        top=65; bottom=self.height()-26; cw=(self.width()-10)/7; ch=(bottom-top)/6
+        days=days_for_month(self.month); rows=len(days)//7
+        top=65; bottom=self.height()-26; cw=(self.width()-10)/7; ch=(bottom-top)/rows
         p.setFont(QFont('Arial',10)); names=['일요일','월요일','화요일','수요일','목요일','금요일','토요일']
         for col,name in enumerate(names):
             p.setPen(QColor('#e9a796' if col==0 else '#c6deea')); p.drawText(QRectF(5+cw*col,36,cw,27),Qt.AlignmentFlag.AlignCenter,name)
-        events=self.store.events(self.month); days=days_for_month(self.month); self.hits=[]
+        events=self.store.events(self.month); self.hits=[]
         compact=self.store.options['compact_emojis'] and cw<155
         for index,day in enumerate(days):
             x=5+(index%7)*cw; y=top+(index//7)*ch; rect=QRectF(x,y,cw,ch)
@@ -567,7 +570,8 @@ class CalendarWindow(QWidget):
 
     def date_at(self,point):
         if not 65<=point.y()<self.height()-26 or not 5<=point.x()<self.width()-5: return None
-        col=min(6,int((point.x()-5)/((self.width()-10)/7))); row=min(5,int((point.y()-65)/((self.height()-91)/6)))
+        rows=len(days_for_month(self.month))//7
+        col=min(6,int((point.x()-5)/((self.width()-10)/7))); row=min(rows-1,int((point.y()-65)/((self.height()-91)/rows)))
         return days_for_month(self.month)[row*7+col]
 
     def mousePressEvent(self,event):

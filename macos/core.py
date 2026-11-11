@@ -45,9 +45,10 @@ def time_valid(value):
 
 def days_for_month(month):
     first = datetime.strptime(month + '-01', '%Y-%m-%d').date()
-    # Sunday first, always six rows like the Windows widget.
+    # Sunday first; Windows uses five or six rows, with a minimum of five.
+    rows=max(5,((first.weekday()+1)%7+calendar.monthrange(first.year,first.month)[1]+6)//7)
     first -= timedelta(days=(first.weekday() + 1) % 7)
-    return [(first + timedelta(days=i)).isoformat() for i in range(42)]
+    return [(first + timedelta(days=i)).isoformat() for i in range(rows*7)]
 
 
 def context_key(event):

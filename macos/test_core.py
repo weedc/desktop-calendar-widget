@@ -20,7 +20,9 @@ class CalendarTests(unittest.TestCase):
 
     def test_grid_year_boundary(self):
         self.assertEqual(days_for_month('2027-01')[0],'2026-12-27')
-        self.assertEqual(len(days_for_month('2024-02')),42)
+        self.assertEqual(len(days_for_month('2024-02')),35)
+        self.assertEqual(len(days_for_month('2027-01')),42)
+        self.assertEqual(len(days_for_month('2026-11')),35)
 
     def test_validation(self):
         for s in ['2026-00','2026-13','2026-1','hello']: self.assertFalse(month_valid(s))
