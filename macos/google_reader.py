@@ -60,12 +60,14 @@ class GoogleReader:
         # AppleScript literals: JSON's ASCII escapes are not AppleScript escapes.
         return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\r', '\\r').replace('\n', '\\n') + '"'
 
-    def open(self, url):
+    def open(self, url, background=False):
         self.close()
         if urlparse(url).hostname != 'calendar.google.com':
             raise ValueError('Google Calendar 공식 주소만 열 수 있습니다.')
         self.window_id = int(self.apple('tell application "Google Chrome"\n'
-            'set w to make new window\nset bounds of w to {80, 80, 1560, 1680}\nset URL of active tab of w to ' + self.quote(url) + '\nreturn id of w\nend tell'))
+            'set w to make new window\nset bounds of w to {80, 80, 1560, 1680}\n'+
+            ('set minimized of w to true\n' if background else '')+
+            'set URL of active tab of w to ' + self.quote(url) + '\nreturn id of w\nend tell'))
 
     def js(self, source):
         if self.window_id is None:
@@ -97,7 +99,7 @@ class GoogleReader:
             if email:
                 query['authuser'] = email
             try:
-                self.open('https://calendar.google.com/calendar/embed?' + urlencode(query))
+                self.open('https://calendar.google.com/calendar/embed?' + urlencode(query),background=True)
                 snapshot = None
                 for _ in range(50):
                     snapshot = json.loads(self.js(SNAPSHOT_JS))
@@ -119,6 +121,9 @@ class GoogleReader:
                 self.close()
             except Exception as error:
                 # Preserve a login/permission page so the user can finish logging in.
+                if self.window_id is not None:
+                    try: self.apple('tell application "Google Chrome" to set minimized of window id '+str(self.window_id)+' to false')
+                    except Exception: pass
                 errors.append(source['name'] + ': ' + str(error))
         return dict(month=month, outcomes=successes, errors=errors, at=now().isoformat())
 
