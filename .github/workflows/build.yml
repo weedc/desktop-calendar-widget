@@ -20,6 +20,8 @@ jobs:
         run: ./build.ps1
       - name: Run isolated self-checks
         run: python tests/run_self_checks.py
+      - name: Check MCP protocol and tool schemas
+        run: python tests/run_mcp_checks.py
       - name: Package portable application
         shell: pwsh
         run: ./package.ps1

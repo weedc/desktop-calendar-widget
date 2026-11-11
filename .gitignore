@@ -18,4 +18,10 @@ events-*.json
 settings*.xml
 verification*.json
 widget-preview.*
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.gif
 *.zip

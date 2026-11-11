@@ -118,7 +118,7 @@ namespace TeamCalendar
         readonly CheckBox important;
         readonly Label detail;
         readonly SoftButton delete;
-        readonly SoftButton googleAdd;
+        readonly SoftButton googleAdd, emojiEdit;
         readonly Timer autosave;
         LocalNote editing;
         CalendarEvent selected;
@@ -127,7 +127,8 @@ namespace TeamCalendar
         public DayDetails(CalendarWindow calendar) : base("날짜별 일정 · 메모", new Size(590, 680))
         {
             owner = calendar;
-            Caption("일정을 선택하면 상세 정보와 중요 표시를 편집할 수 있어요.", 20, 66, 550);
+            Caption("일정을 선택해 중요 표시와 이모지를 바꿔 보세요.", 20, 66, 380);
+            emojiEdit = Action("이모지 설정", 415, 61, 155, delegate { if (selected != null) { SavePending(); owner.ShowEmojiEditor(selected); } }); emojiEdit.Enabled = false;
             list = new EventCanvas { Left = 20, Top = 95, Width = 550, Height = 230, Font = Font, Important = owner.IsImportant }; Controls.Add(list);
             list.Selected = SelectItem;
             detail = Caption("", 20, 332, 550); detail.Height = 42;
@@ -150,13 +151,13 @@ namespace TeamCalendar
         {
             if (day.Date == Day && Visible) return;
             SavePending(); changing = true; Day = day.Date; Text = Heading.Text = day.ToString("M월 d일 dddd", CultureInfo.GetCultureInfo("ko-KR"));
-            editing = null; selected = null; entry.Clear(); time.Clear(); important.Checked = false; detail.Text = "메모는 입력 후 자동으로 저장됩니다."; changing = false; RefreshItems(); list.ResetScroll();
+            editing = null; selected = null; emojiEdit.Enabled = false; entry.Clear(); time.Clear(); important.Checked = false; detail.Text = "메모는 입력 후 자동으로 저장됩니다."; changing = false; RefreshItems(); list.ResetScroll();
         }
-        public void RefreshItems() { list.SetItems(owner.DayEvents(Day)); delete.Enabled = editing != null; googleAdd.Enabled = owner.FeatureData.ActiveCalendars().Any(c => c.enabled); }
+        public void RefreshItems() { var items = owner.DayEvents(Day); list.SetItems(items); if (selected != null && !items.Any(e => e.id == selected.id)) { selected = null; emojiEdit.Enabled = false; } delete.Enabled = editing != null; googleAdd.Enabled = owner.FeatureData.ActiveCalendars().Any(c => c.enabled); }
         void SelectItem(CalendarEvent item)
         {
-            SavePending(); selected = item; detail.Text = item.time + (item.location == "" ? "" : "  ·  " + item.location);
-            if (!item.isNote) return;
+            SavePending(); selected = item; emojiEdit.Enabled = true; detail.Text = item.time + (item.location == "" ? "" : "  ·  " + item.location);
+            if (!item.isNote) { changing = true; editing = null; entry.Clear(); time.Clear(); important.Checked = false; changing = false; delete.Enabled = false; return; }
             editing = owner.FeatureData.notes.FirstOrDefault(n => "note-" + n.id == item.uid); if (editing == null) return;
             changing = true; entry.Text = editing.text; time.Text = editing.time; palette.Selected = editing.color; palette.Invalidate(); important.Checked = editing.important; changing = false; delete.Enabled = true;
         }

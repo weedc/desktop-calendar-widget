@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -37,6 +37,7 @@ namespace TeamCalendar
         public string month, syncedAt;
         public List<CalendarEvent> events = new List<CalendarEvent>();
         public List<string> warnings = new List<string>();
+        public List<string> failedCalendars = new List<string>();
     }
 
     static class App
@@ -133,11 +134,23 @@ namespace TeamCalendar
                     if (existing.Contains(candidate) || !IsSourceWindow(candidate)) continue;
                     window = candidate;
                     long ex = Win.GetWindowLongPtr(window, -20).ToInt64();
-                    Win.SetWindowLongPtr(window, -20, new IntPtr((ex & ~0x40000L) | 0x80L));
+                    // Materialize Chrome's accessibility document before moving it off-screen.
+                    // A one-step alpha keeps Chrome rendering during initialization without
+                    // accepting input or activation. It becomes fully invisible off-screen.
+                    Win.SetWindowLongPtr(window, -20, new IntPtr((ex & ~0x40000L) | 0x080800a0L));
+                    Win.SetLayeredWindowAttributes(window, 0, 1, 2);
+                    Win.ShowWindow(window, 4);
+                    var area = Screen.PrimaryScreen.WorkingArea;
+                    Win.SetWindowPos(window, new IntPtr(-1), area.Left, area.Top, 2000, Math.Min(1300, area.Height), 0x0010 | 0x0040 | 0x0020);
+                    bool ready = false;
+                    for (int warm = 0; warm < 120 && !disposed; warm++)
+                    { try { var root = AutomationElement.FromHandle(window); Header(root); if (root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)) == null) throw new InvalidOperationException(); ready = true; break; } catch { Thread.Sleep(250); } }
+                    if (!ready) { Win.SetLayeredWindowAttributes(window, 0, 0, 2); Win.SetWindowPos(window, new IntPtr(1), -16000, 0, 2000, 1300, 0x0010); throw new InvalidOperationException("Google 캘린더 화면을 초기화하지 못했습니다. Chrome 로그인을 확인해 주세요."); }
                     long style = Win.GetWindowLongPtr(window, -16).ToInt64();
-                    Win.SetWindowLongPtr(window, -16, new IntPtr((style & ~0x80C40000L) | 0x40000000L | 0x10000000L));
+                    Win.SetWindowLongPtr(window, -16, new IntPtr((style & ~0xa1c40000L) | 0x40000000L | 0x10000000L));
                     Win.SetParent(window, Win.DesktopHost());
                     Win.SetWindowPos(window, new IntPtr(1), -16000, 0, 2000, 3600, 0x0010 | 0x0040 | 0x0020);
+                    Win.SetLayeredWindowAttributes(window, 0, 0, 2);
                     App.Log("Reader connected, HWND=" + window.ToInt64()); return;
                 }
                 Thread.Sleep(200);
@@ -284,6 +297,9 @@ namespace TeamCalendar
         Point initialPosition;
         IntPtr desktopHost;
         DateTime lastSync = DateTime.MinValue;
+        readonly Dictionary<string, DateTime> syncAttempts = new Dictionary<string, DateTime>();
+        bool pendingVisibleRefresh;
+        int syncStarted, syncCompleted;
         string syncMessage = "구글 캘린더 연결 중…", hover = "";
         int rowCount = 6;
         const int HeaderHeight = 38, WeekHeight = 26, FooterHeight = 23;
@@ -297,7 +313,7 @@ namespace TeamCalendar
             BackColor = Color.FromArgb(20, 43, 56); ForeColor = Color.FromArgb(241, 248, 252);
             Font = new Font("맑은 고딕", settings.FontSize);
             DoubleBuffered = true; SetStyle(ControlStyles.ResizeRedraw, true); KeyPreview = true;
-            ShowInTaskbar = false; Icon = MakeIcon();
+            ShowInTaskbar = !settings.Desktop; Icon = MakeIcon();
             SetInitialPosition();
             initialPosition = Location;
             menu = new ContextMenuStrip();
@@ -325,8 +341,7 @@ namespace TeamCalendar
             startup.Click += delegate
             {
                 bool enabled = !StartupEnabled();
-                using (var key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
-                { if (enabled) key.SetValue("DesktopCalendarWidget", "\"" + Application.ExecutablePath + "\""); else key.DeleteValue("DesktopCalendarWidget", false); }
+                StartupRegistration.Set(enabled);
                 startup.Checked = enabled;
             };
             menu.Items.Add(startup);
@@ -360,18 +375,19 @@ namespace TeamCalendar
                 { resizing = true; resizeStart = Cursor.Position; resizeSize = Size; Capture = true; }
             };
             MouseUp += delegate { if (resizing) { resizing = false; Capture = false; Save(); } };
-            tray = new NotifyIcon { Icon = Icon, Text = "팀 캘린더 · Dot 연결", ContextMenuStrip = menu, Visible = true };
+            tray = new NotifyIcon { Icon = Icon, Text = "팀 캘린더", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += delegate { ShowWidget(); };
             pulse = new System.Windows.Forms.Timer { Interval = 500 };
-            pulse.Tick += delegate { if (App.ShowSignal.WaitOne(0)) ShowWidget(); if (!loading && (DateTime.Now - lastSync).TotalMinutes >= 2) RefreshMonth(false); FeaturePulse(); };
+            pulse.Tick += delegate { if (App.ShowSignal.WaitOne(0)) ShowWidget(); FeaturePulse(); AutoRefreshDue(); };
             Shown += delegate
             {
                 if (settings.Desktop && desktopHost != IntPtr.Zero && Win.GetParent(Handle) == desktopHost) { pinned = true; desktopMenu.Checked = true; }
                 else Pin(settings.Desktop);
                 Location = initialPosition; SetOpacity(settings.Opacity); UpdateMonthLabel();
                 if (pinned) Win.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0013);
-                App.Log("Widget HWND=" + Handle.ToInt64()); Bridge.Start(this); pulse.Start(); RefreshMonth(false);
-                if (!features.setupCompleted) { features.setupCompleted = true; features.Save(); BeginInvoke((Action)ShowCalendarManager); }
+                App.Log("Widget HWND=" + Handle.ToInt64()); Bridge.Start(this); pulse.Start(); LoadCachedMonth(month); if (features.autoSyncEnabled) RefreshMonth(false); else { syncMessage = "저장된 일정 · ↻ 버튼으로 새로고침"; Invalidate(); }
+                if (!features.setupCompleted) BeginInvoke((Action)delegate { ShowCalendarManager(true); });
+                Win.RepaintDesktop();
             };
             FormClosing += delegate { shuttingDown = true; Save(); pulse.Stop(); reader.Dispose(); tray.Visible = false; tray.Dispose(); App.Log("Widget closed."); };
             InitializeFeatures();
@@ -415,23 +431,23 @@ namespace TeamCalendar
         void RefreshMonth(bool force, DateTime? backgroundMonth = null)
         {
             if (shuttingDown) return;
-            if (loading) { if (force) pendingForceRefresh = true; return; }
             DateTime requested = backgroundMonth.HasValue ? backgroundMonth.Value : month;
+            if (loading) { if (!backgroundMonth.HasValue) { pendingVisibleRefresh = true; if (force) pendingForceRefresh = true; } return; }
+            syncAttempts[requested.ToString("yyyy-MM")] = DateTime.UtcNow; syncStarted++;
             loading = true; syncMessage = "구글 캘린더 확인 중…"; Invalidate();
             Task.Run(delegate
             {
                 MonthData data = null; string error = null;
-                try { data = reader.Read(requested, force || lastSync != DateTime.MinValue && (DateTime.Now - lastSync).TotalMinutes >= 2); } catch (Exception e) { error = e.Message; App.Log("Sync failed: " + e.GetType().Name + ": " + e.Message); }
+                try { data = reader.Read(requested, force); } catch (Exception e) { error = e.Message; App.Log("Sync failed: " + e.GetType().Name + ": " + e.Message); }
                 if (shuttingDown) return;
                 BeginInvoke((Action)delegate
                 {
-                    loading = false; lastSync = DateTime.Now;
-                    if (reloadCalendars) { reloadCalendars = false; ReconfigureCalendars(); return; }
-                    if (data != null) { cache[data.month] = data; File.WriteAllText(Path.Combine(App.DataDir, "events-" + data.month + ".json"), App.Json.Serialize(data), Encoding.UTF8); syncMessage = data.warnings.Count > 0 ? "일부 캘린더 연결 확인 · " + string.Join(" / ", data.warnings) : "Google Calendar · " + DateTime.Now.ToString("HH:mm") + " 확인 · Dot 연결"; }
+                    loading = false; lastSync = DateTime.Now; syncCompleted++;
+                    if (reloadCalendars) { reloadCalendars = false; pendingForceRefresh = pendingVisibleRefresh = false; ReconfigureCalendars(); return; }
+                    if (data != null) { StoreMonth(data); syncMessage = data.warnings.Count > 0 ? "일부 캘린더 연결 확인 · " + string.Join(" / ", data.warnings) : "Google Calendar · " + DateTime.Now.ToString("HH:mm") + " 확인"; }
                     else syncMessage = "연결 확인 필요 · " + error;
                     Invalidate(); if (dayDetails != null && !dayDetails.IsDisposed) dayDetails.RefreshItems();
-                    if (pendingForceRefresh) { pendingForceRefresh = false; RefreshMonth(true); }
-                    else if (month != requested && !backgroundMonth.HasValue) RefreshMonth(false);
+                    if (pendingForceRefresh || pendingVisibleRefresh || month != requested && !backgroundMonth.HasValue) { bool nextForce = pendingForceRefresh; pendingForceRefresh = pendingVisibleRefresh = false; RefreshMonth(nextForce); }
                 });
             });
         }
@@ -474,7 +490,9 @@ namespace TeamCalendar
                     string dayText = day.Day == 1 ? day.ToString("M/d") : day.Day.ToString();
                     TextRenderer.DrawText(g, dayText + (today ? "  오늘" : ""), dayFont, new Rectangle(cell.X + 6, cell.Y + 4, cell.Width - 10, 21), dateColor, TextFormatFlags.Left | TextFormatFlags.NoPadding);
                     var list = events.Where(item => item.date == day.ToString("yyyy-MM-dd")).ToList();
-                    int lineHeight = Math.Max(19, Font.Height + 5), capacity = Math.Max(0, (cell.Height - 32) / lineHeight);
+                    var density = EmojiData.Density(cw, ch, features.compactEmojis);
+                    if (density == CalendarDensity.Stickers) { DrawStickers(g, list, cell, day); continue; }
+                    int lineHeight = Math.Max(23, Font.Height + 5), capacity = Math.Max(0, (cell.Height - 32) / lineHeight);
                     int shown = Math.Min(list.Count, list.Count > capacity ? Math.Max(0, capacity - 1) : capacity);
                     for (int j = 0; j < shown; j++)
                     {
@@ -491,7 +509,7 @@ namespace TeamCalendar
                     }
                     if (shown < list.Count) TextRenderer.DrawText(g, "+" + (list.Count - shown) + "개 더 보기", small, new Rectangle(cell.X + 8, cell.Y + 29 + shown * lineHeight, cell.Width - 12, 20), Color.FromArgb(164, 213, 226), TextFormatFlags.NoPadding);
                 }
-                TextRenderer.DrawText(g, syncMessage, footer, new Rectangle(10, Height - FooterHeight + 2, Width - 35, FooterHeight - 3), Color.FromArgb(175, 202, 214), TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(g, SyncStatus, footer, new Rectangle(10, Height - FooterHeight + 2, Width - 35, FooterHeight - 3), Color.FromArgb(175, 202, 214), TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
                 g.DrawLine(line, Width - 12, Height - 5, Width - 5, Height - 12); g.DrawLine(line, Width - 8, Height - 5, Width - 5, Height - 8);
             }
         }
@@ -503,7 +521,7 @@ namespace TeamCalendar
                 return;
             }
             var hit = hits.FirstOrDefault(h => h.bounds.Contains(e.Location));
-            string text = hit == null ? "" : hit.item.title + "\n" + hit.day.ToString("M월 d일") + " · " + hit.item.time + (hit.item.location == "" ? "" : "\n" + hit.item.location);
+            string text = hit == null ? "" : EmojiData.Icons(EventEmoji(hit.item)) + " " + hit.item.title + "\n" + hit.day.ToString("M월 d일") + " · " + hit.item.time + (hit.item.location == "" ? "" : "\n" + hit.item.location);
             if (hover != text) { hover = text; tooltip.SetToolTip(this, text); }
             Cursor = e.X >= Width - 20 && e.Y >= Height - 20 ? Cursors.SizeNWSE : hit == null ? Cursors.Default : Cursors.Hand;
         }
@@ -523,25 +541,32 @@ namespace TeamCalendar
         void Pin(bool enabled)
         {
             if (!IsHandleCreated) return; positioning = true;
+            IntPtr previousParent = Win.GetParent(Handle);
+            if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
             Point origin = PointToScreen(Point.Empty); IntPtr parent = enabled ? Win.DesktopHost() : IntPtr.Zero;
             if (enabled && parent == IntPtr.Zero) enabled = false;
             settings.Desktop = enabled; desktopHost = parent;
+            ShowInTaskbar = !enabled;
             long style = Win.GetWindowLongPtr(Handle, -16).ToInt64();
             if (enabled) Win.SetWindowLongPtr(Handle, -16, new IntPtr((style & ~0x80cf0000L) | 0x40000000L));
             Win.SetParent(Handle, parent);
-            if (!enabled) Win.SetWindowLongPtr(Handle, -16, new IntPtr((style & ~0x40000000L) | 0x80000000L));
+            if (!enabled) Win.SetWindowLongPtr(Handle, -16, new IntPtr((style & ~0x40000000L) | 0x800a0000L));
+            long extended = Win.GetWindowLongPtr(Handle, -20).ToInt64();
+            Win.SetWindowLongPtr(Handle, -20, new IntPtr(enabled ? (extended & ~0x40000L) | 0x80L : (extended & ~0x80L) | 0x40000L));
             if (enabled) { var point = new Win.POINT { X = origin.X, Y = origin.Y }; Win.ScreenToClient(parent, ref point); Location = new Point(point.X, point.Y); } else Location = origin;
             pinned = settings.Desktop = enabled; desktopMenu.Checked = enabled;
             Win.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, enabled ? 0x0033u : 0x0037u); positioning = false;
+            ShowWidget();
+            if (previousParent != IntPtr.Zero && previousParent != parent) Win.RedrawWindow(previousParent, IntPtr.Zero, IntPtr.Zero, 0x0185);
         }
         void Save()
         {
-            if (positioning || !IsHandleCreated) return; Point origin = PointToScreen(Point.Empty);
+            if (positioning || !IsHandleCreated || WindowState != FormWindowState.Normal) return; Point origin = PointToScreen(Point.Empty);
             settings.X = origin.X; settings.Y = origin.Y; settings.Width = Width; settings.Height = Height; settings.Desktop = pinned; App.Save(settings);
         }
         void SetOpacity(int percent) { settings.Opacity = Math.Max(35, Math.Min(100, percent)); Opacity = settings.Opacity / 100.0; Save(); }
-        void ShowWidget() { Show(); Win.ShowWindow(Handle, 4); }
-        bool StartupEnabled() { using (var key = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) return key != null && key.GetValue("DesktopCalendarWidget") != null; }
+        void ShowWidget() { if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal; Show(); Win.ShowWindow(Handle, 4); if (tray != null) tray.Visible = true; }
+        bool StartupEnabled() { return StartupRegistration.Enabled(); }
         void DragStart(object s, MouseEventArgs e) { if (e.Button != MouseButtons.Left) return; dragging = true; mouseStart = Cursor.Position; formStart = Location; ((Control)s).Capture = true; }
         void DragMove(object s, MouseEventArgs e) { if (dragging) Location = new Point(formStart.X + Cursor.Position.X - mouseStart.X, formStart.Y + Cursor.Position.Y - mouseStart.Y); }
         void DragEnd(object s, MouseEventArgs e) { dragging = false; ((Control)s).Capture = false; Save(); }
@@ -566,9 +591,11 @@ namespace TeamCalendar
             else if (command == "opacity") SetOpacity(int.Parse(App.Str(args, "percent")));
             else if (command == "show") ShowWidget();
             else if (command == "hide") Hide();
+            else if (command == "minimize") WindowState = FormWindowState.Minimized;
+            else if (command == "repaint_desktop") Win.RepaintDesktop();
             else if (command == "resize") { Size = new Size(Math.Max(700, int.Parse(App.Str(args, "width"))), Math.Max(410, int.Parse(App.Str(args, "height")))); Save(); }
             else if (command == "move") { Location = new Point(int.Parse(App.Str(args, "x")), int.Parse(App.Str(args, "y"))); Save(); }
-            else if (command == "pin") { Pin(App.Str(args, "enabled", "true") == "true"); Save(); }
+            else if (command == "pin") { Pin(App.Str(args, "enabled", "true").ToLowerInvariant() == "true"); Save(); }
             else if (command == "draft") { DateTime day = DateTime.ParseExact(App.Str(args, "date"), "yyyy-MM-dd", CultureInfo.InvariantCulture); App.Open(App.DraftUrl(day, App.Str(args, "title"))); return new { opened = true, saved = false, calendarId = features.ActiveCalendars().First(s => s.enabled).id, message = "구글 캘린더 초안을 열었습니다. 저장 전 대상 캘린더를 확인해 주세요." }; }
             else if (command == "quit") BeginInvoke((Action)Close);
             else throw new ArgumentException("지원하지 않는 명령입니다.");

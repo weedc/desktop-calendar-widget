@@ -43,6 +43,12 @@ namespace TeamCalendar
         public List<Accent> highlights = new List<Accent>();
         public List<Accent> days = new List<Accent>();
         public List<ReminderRecord> reminders = new List<ReminderRecord>();
+        public List<EmojiMark> emojis = new List<EmojiMark>();
+        public List<ProjectMark> projectEmojis = new List<ProjectMark>();
+        public bool compactEmojis = true, autoSyncEnabled = true;
+        public bool dailySummaryEnabled = true;
+        public string dailySummaryCheckedDate = "", dailySummaryTime = "00:00";
+        public void SetDailySummaryTime(string value) { if (dailySummaryTime != value) dailySummaryCheckedDate = ""; dailySummaryTime = value; }
         public string chromeProfile = "", googleUser = "";
         public bool remindersEnabled = true, allDayReminders = false;
         public int reminderMinutes = 60;
@@ -111,7 +117,7 @@ namespace TeamCalendar
             foreach (var reader in readers)
             {
                 try { data.events.AddRange(reader.Read(month, force).events); }
-                catch (Exception e) { failures.Add(reader.Source.name + ": " + e.Message); }
+                catch (Exception e) { failures.Add(reader.Source.name + ": " + e.Message); data.failedCalendars.Add(reader.Source.id); }
             }
             if (readers.Count > 0 && failures.Count == readers.Count) throw new InvalidOperationException(string.Join(" / ", failures));
             data.warnings = failures;

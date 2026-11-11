@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -22,7 +22,8 @@ namespace TeamCalendar
             menu.Items.Insert(1, new ToolStripSeparator());
             menu.Items.Insert(1, new ToolStripMenuItem("Codex · Dot 연동", null, delegate { ShowCodexDialog(); }));
             tray.BalloonTipShown += delegate { lastBalloon = DateTime.Now; App.Log("Windows notification shown."); };
-            FormClosed += delegate { if (dayDetails != null && !dayDetails.IsDisposed) dayDetails.Close(); if (codexDialog != null && !codexDialog.IsDisposed) codexDialog.Close(); };
+            tray.BalloonTipClicked += delegate { ShowWidget(); ShowDay(DailySummaryPolicy.Seoul(DateTimeOffset.Now).Date); };
+            FormClosed += delegate { if (dayDetails != null && !dayDetails.IsDisposed) dayDetails.Close(); if (codexDialog != null && !codexDialog.IsDisposed) codexDialog.Close(); if (emojiDialog != null && !emojiDialog.IsDisposed) emojiDialog.Close(); };
             UpdateCalendarTitle();
         }
         void UpdateCalendarTitle()
@@ -34,9 +35,13 @@ namespace TeamCalendar
         void SaveFeatures() { features.Save(); Invalidate(); }
         void ShowCalendarManager()
         {
+            ShowCalendarManager(false);
+        }
+        void ShowCalendarManager(bool initialSetup)
+        {
             if (calendarManager != null && !calendarManager.IsDisposed) { calendarManager.Activate(); return; }
             string before = App.Json.Serialize(new { features.calendars, features.chromeProfile, features.googleUser, features.connectionMode, features.accountCalendars, features.accountProfile, features.accountEmail });
-            var dialog = new CalendarManager(features, settings, pinned, StartupEnabled(), ShowCodexDialog);
+            var dialog = new CalendarManager(features, settings, pinned, StartupEnabled(), ShowCodexDialog, TestDailySummary, initialSetup);
             calendarManager = dialog;
             dialog.FormClosed += delegate
             {
@@ -46,11 +51,11 @@ namespace TeamCalendar
                     if (dialog.QuitRequested) { Close(); return; }
                     settings.FontSize = dialog.FontSizeValue; Font = new Font("맑은 고딕", settings.FontSize); SetOpacity(dialog.OpacityValue);
                     if (pinned != dialog.DesktopValue) Pin(dialog.DesktopValue);
-                    using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
-                    { if (dialog.StartupValue) key.SetValue("DesktopCalendarWidget", "\"" + Application.ExecutablePath + "\""); else key.DeleteValue("DesktopCalendarWidget", false); }
+                    StartupRegistration.Set(dialog.StartupValue);
                     features.Save(); Save();
                     if (before != App.Json.Serialize(new { features.calendars, features.chromeProfile, features.googleUser, features.connectionMode, features.accountCalendars, features.accountProfile, features.accountEmail })) ReconfigureCalendars();
                     else { UpdateCalendarTitle(); Invalidate(); }
+                    if (dialog.OpenCodexAfterApply) BeginInvoke((Action)ShowCodexDialog);
                 }
                 dialog.Dispose();
             };
@@ -63,7 +68,7 @@ namespace TeamCalendar
         }
         void ReconfigureCalendars()
         {
-            cache.Clear(); UpdateCalendarTitle(); Invalidate();
+            cache.Clear(); syncAttempts.Clear(); LoadCachedMonth(month); UpdateCalendarTitle(); Invalidate();
             if (loading) { reloadCalendars = true; return; }
             reader.Reconfigure(features); RefreshMonth(true);
         }
@@ -130,10 +135,8 @@ namespace TeamCalendar
         }
         void FeaturePulse()
         {
-            if ((DateTime.Now - reminderCheck).TotalSeconds >= 10) { reminderCheck = DateTime.Now; TickReminders(); }
-            if (!features.remindersEnabled || loading) return;
-            DateTime todayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1); MonthData data;
-            if (!cache.TryGetValue(todayMonth.ToString("yyyy-MM"), out data) || (DateTimeOffset.Now - DateTimeOffset.Parse(data.syncedAt)).TotalMinutes >= 2) RefreshMonth(true, todayMonth);
+            if ((DateTime.Now - reminderCheck).TotalSeconds >= 10) { reminderCheck = DateTime.Now; TickDailySummary(DateTimeOffset.Now); TickReminders(); }
+
         }
         List<ReminderRecord> CalculateReminders(DateTimeOffset now)
         {
@@ -153,11 +156,11 @@ namespace TeamCalendar
             bool changed = false;
             foreach (var record in CalculateReminders(DateTimeOffset.Now)) if (!features.reminders.Any(r => r.id == record.id)) { features.reminders.Add(record); changed = true; }
             var pending = PendingReminders().Where(r => !r.desktopShown).ToList();
-            if (pending.Count > 0)
+            if (pending.Count > 0 && DailySummaryPolicy.CanNotify(lastSystemNotice, DateTimeOffset.Now))
             {
                 string body = string.Join("\n", pending.Take(5).Select(r => DateTimeOffset.Parse(r.start).ToString("HH:mm") + "  " + r.title));
                 int remaining = Math.Max(1, (int)Math.Ceiling((DateTimeOffset.Parse(pending[0].start) - DateTimeOffset.Now).TotalMinutes));
-                tray.ShowBalloonTip(15000, pending.Count == 1 ? "일정 " + Math.Min(features.reminderMinutes, remaining) + "분 전" : "다가오는 일정 " + pending.Count + "개", body.Length > 250 ? body.Substring(0, 247) + "…" : body, ToolTipIcon.Info);
+                ShowSystemNotice(pending.Count == 1 ? "일정 " + Math.Min(features.reminderMinutes, remaining) + "분 전" : "다가오는 일정 " + pending.Count + "개", body.Length > 250 ? body.Substring(0, 247) + "…" : body);
                 foreach (var item in pending) item.desktopShown = true; changed = true;
             }
             if (changed) SaveFeatures();
@@ -170,15 +173,33 @@ namespace TeamCalendar
         bool TryFeatureCommand(Dictionary<string, object> args, out object result)
         {
             result = null; string command = App.Str(args, "command");
-            if (command == "status") result = new { calendarId = features.ActiveCalendars().FirstOrDefault(s => s.enabled) == null ? "" : features.ActiveCalendars().First(s => s.enabled).id, calendars = features.ActiveCalendars(), connectionMode = features.connectionMode, calendar = nameLabel.Text, month = month.ToString("yyyy-MM"), loading = loading, message = syncMessage, opacity = settings.Opacity, desktop = pinned, visible = Visible, processId = System.Diagnostics.Process.GetCurrentProcess().Id, windowId = Handle.ToInt64(), readerWindowId = reader.Window.ToInt64(), bounds = new { x = PointToScreen(Point.Empty).X, y = PointToScreen(Point.Empty).Y, width = Width, height = Height }, noteCount = features.notes.Count, selectedDay = dayDetails == null || dayDetails.IsDisposed ? null : dayDetails.Day.ToString("yyyy-MM-dd"), detailsWindowId = dayDetails == null || dayDetails.IsDisposed ? 0 : dayDetails.Handle.ToInt64(), settingsWindowId = calendarManager == null || calendarManager.IsDisposed ? 0 : calendarManager.Handle.ToInt64(), reminderMinutes = features.reminderMinutes, remindersEnabled = features.remindersEnabled, lastBalloonShown = lastBalloon == DateTime.MinValue ? null : lastBalloon.ToString("o") };
+            if (command == "status") result = new { calendarId = features.ActiveCalendars().FirstOrDefault(s => s.enabled) == null ? "" : features.ActiveCalendars().First(s => s.enabled).id, calendars = features.ActiveCalendars(), connectionMode = features.connectionMode, calendar = nameLabel.Text, month = month.ToString("yyyy-MM"), loading = loading, autoSyncEnabled = features.autoSyncEnabled, autoSyncMinutes = SyncPolicy.Minutes, compactEmojis = features.compactEmojis, density = EmojiData.Density(GridBounds.Width / 7F, GridBounds.Height / (float)rowCount, features.compactEmojis).ToString(), syncStarted = syncStarted, syncCompleted = syncCompleted, message = SyncStatus, opacity = settings.Opacity, desktop = pinned, visible = Visible, processId = System.Diagnostics.Process.GetCurrentProcess().Id, windowId = Handle.ToInt64(), readerWindowId = reader.Window.ToInt64(), bounds = new { x = PointToScreen(Point.Empty).X, y = PointToScreen(Point.Empty).Y, width = Width, height = Height }, noteCount = features.notes.Count, selectedDay = dayDetails == null || dayDetails.IsDisposed ? null : dayDetails.Day.ToString("yyyy-MM-dd"), detailsWindowId = dayDetails == null || dayDetails.IsDisposed ? 0 : dayDetails.Handle.ToInt64(), settingsWindowId = calendarManager == null || calendarManager.IsDisposed ? 0 : calendarManager.Handle.ToInt64(), reminderMinutes = features.reminderMinutes, remindersEnabled = features.remindersEnabled, lastBalloonShown = lastBalloon == DateTime.MinValue ? null : lastBalloon.ToString("o") };
             else if (command == "events")
             {
                 string key = App.Str(args, "month", month.ToString("yyyy-MM")); MonthData data;
-                if (cache.TryGetValue(key, out data)) result = new { calendarId = features.ActiveCalendars().FirstOrDefault(s => s.enabled) == null ? "" : features.ActiveCalendars().First(s => s.enabled).id, data = new MonthData { month = data.month, syncedAt = data.syncedAt, events = data.events.Concat(NoteEvents().Where(n => n.date.StartsWith(key))).ToList() } };
-                else { SetMonth(DateTime.ParseExact(key + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture)); result = new { pending = true, month = key, message = syncMessage }; }
+                if (cache.TryGetValue(key, out data)) result = new { calendarId = features.ActiveCalendars().FirstOrDefault(s => s.enabled) == null ? "" : features.ActiveCalendars().First(s => s.enabled).id, data = new MonthData { month = data.month, syncedAt = data.syncedAt, events = data.events.Concat(NoteEvents().Where(n => n.date.StartsWith(key))).ToList(), warnings = data.warnings } };
+                else if (App.Str(args, "cached_only", "false").ToLowerInvariant() == "true") result = new { available = false, pending = false, month = key, message = "캐시가 없습니다. 필요할 때 수동으로 새로고침해 주세요." };
+                else { RefreshMonth(false, DateTime.ParseExact(key + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture)); result = new { pending = true, month = key, message = syncMessage }; }
             }
             else if (command == "desktop_status") result = Win.DesktopDiagnostics(Handle);
             else if (command == "setup_status") result = new { completed = features.setupCompleted, settingsVisible = calendarManager != null && !calendarManager.IsDisposed && calendarManager.Visible };
+            else if (command == "sync_settings") { if (args.ContainsKey("enabled")) { features.autoSyncEnabled = App.Str(args, "enabled").ToLowerInvariant() == "true"; SaveFeatures(); } result = new { enabled = features.autoSyncEnabled, intervalMinutes = SyncPolicy.Minutes, started = syncStarted, completed = syncCompleted }; }
+            else if (command == "daily_summary_settings") {
+                string time = App.Str(args, "time", features.dailySummaryTime);
+                if (!DailySummaryPolicy.ValidTime(time)) throw new ArgumentException("요약 시각은 HH:mm 형식의 한국 시간으로 입력해 주세요.");
+                if (args.ContainsKey("enabled")) features.dailySummaryEnabled = App.Str(args, "enabled").ToLowerInvariant() == "true";
+                features.SetDailySummaryTime(time); SaveFeatures();
+                result = new { enabled = features.dailySummaryEnabled, time = features.dailySummaryTime, timezone = "Asia/Seoul", delivery = "Windows", checkedDate = features.dailySummaryCheckedDate };
+            }
+            else if (command == "daily_summary_preview") result = DailySummaryPolicy.Build(ActiveItems(), DateTimeOffset.Parse(App.Str(args, "at", DateTimeOffset.Now.ToString("o"))));
+            else if (command == "test_daily_summary") { TestDailySummary(); result = new { requested = true }; }
+            else if (command == "emoji_pending") result = EmojiPending();
+            else if (command == "emoji_set") result = SetEmojiCommand(args);
+            else if (command == "emoji_get") result = EmojiValues();
+            else if (command == "emoji_clear") { string key = App.Str(args, "key"); var item = ActiveItems().FirstOrDefault(e => EmojiData.Key(e) == key); if (item == null) throw new ArgumentException("현재 일정을 선택해 주세요."); ResetEmoji(item, "", false); result = new { ok = true }; }
+            else if (command == "emoji_editor") { string key = App.Str(args, "key"); var item = ActiveItems().FirstOrDefault(e => EmojiData.Key(e) == key); if (item == null) throw new ArgumentException("현재 일정을 선택해 주세요."); ShowEmojiEditor(item); result = new { windowId = emojiDialog.Handle.ToInt64() }; }
+            else if (command == "window_status") result = new { taskbar = ShowInTaskbar, trayVisible = tray.Visible, visible = Visible, desktop = pinned, state = WindowState.ToString(), windowId = Handle.ToInt64() };
+            else if (command == "emoji_settings") { features.compactEmojis = App.Str(args, "enabled", "true").ToLowerInvariant() == "true"; SaveFeatures(); result = new { enabled = features.compactEmojis }; }
             else if (command == "open_settings") { ShowCalendarManager(); result = new { windowId = calendarManager.Handle.ToInt64() }; }
             else if (command == "account_catalog") result = AccountDiscovery.Status();
             else if (command == "connection_mode") { string mode = App.Str(args, "mode"); if (mode != "id" && mode != "account") throw new ArgumentException("id 또는 account 모드를 선택해 주세요."); features.connectionMode = mode; SaveFeatures(); ReconfigureCalendars(); result = new { mode = mode, calendars = features.ActiveCalendars() }; }
