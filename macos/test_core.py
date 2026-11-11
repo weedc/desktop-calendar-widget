@@ -104,6 +104,11 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len(e),1); self.assertEqual(e[0]['title'],'가상 디자인 회의')
         self.assertEqual(e[0]['start'],'2026-11-02T14:30:00+09:00'); self.assertEqual(e[0]['location'],'온라인')
 
+    def test_incomplete_hidden_events_keep_cache(self):
+        cells=[{'label':f'일정 없음, 11월 {i}일','events':[]} for i in range(1,29)]
+        cells[0]['label']='일정 5개, 11월 1일'
+        with self.assertRaises(ValueError): parse_snapshot({'month':'2026-11','cells':cells},'2026-11',self.store.sources()[0])
+
     def test_codex_config_preservation(self):
         from bridge import codex_registration
         with patch.dict(os.environ,{'CODEX_HOME':self.tmp.name}):
@@ -118,7 +123,7 @@ class CalendarTests(unittest.TestCase):
         requests=[{'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2024-11-05'}},
                   {'jsonrpc':'2.0','id':2,'method':'tools/list'}, {'jsonrpc':'2.0','method':'notifications/initialized'},
                   {'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'calendar_widget_opacity','arguments':{'percent':'bad'}}}]
-        p=subprocess.run([sys.executable,str(Path(__file__).with_name('main.py')),'--mcp'],input='\n'.join(map(json.dumps,requests))+'\n',text=True,capture_output=True,check=True)
+        p=subprocess.run([sys.executable,str(Path(__file__).with_name('main.py')),'--mcp'],input='\n'.join(map(json.dumps,requests))+'\n',text=True,encoding='utf-8',capture_output=True,check=True)
         lines=[json.loads(s) for s in p.stdout.splitlines()]
         self.assertEqual(len(lines),3); self.assertEqual(len(lines[1]['result']['tools']),26)
         self.assertIn('error',lines[2])

@@ -100,6 +100,9 @@ def parse_snapshot(snapshot, month, source):
         day = f'{year:04}-{cm:02}-{cd:02}'
         if not day_valid(day):
             raise ValueError('Google 날짜 형식이 변경되었습니다.')
+        count=re.match(r'^일정 (\d+)개,',cell['label'])
+        if count and int(count[1])>len(cell['events']):
+            raise ValueError('숨겨진 일정을 모두 읽지 못했습니다. 기존 데이터를 유지합니다.')
         for raw in cell['events']:
             if (day, raw) in seen or ', 캘린더: ' not in raw or ', ' not in raw:
                 continue

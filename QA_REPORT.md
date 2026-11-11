@@ -10,6 +10,8 @@ Run `python3 -m unittest discover -s macos -p test_core.py -v` for model tests a
 
 The Chrome adapter reads official Google Calendar accessible DOM labels using user-authorized Apple Events. Live macOS Google login, private calendar access, notification permission/visible delivery, and Mission Control/Stage Manager transitions require a signed-in Mac and are not represented as completed by synthetic tests. Site markup changes may require adapter maintenance. Bundles are ad-hoc signed, without Developer ID notarization. macOS 14 or later is required.
 
+A fresh, unsigned-in headless Chrome session also exercised the exact DOM extraction program against an official public calendar: 35 date cells and five November 2026 occurrences were read. This caught and corrected the distinction between `aria-label`, `aria-labelledby`, and hidden accessible event text. This is a public Google DOM check on Windows, not a claim of live macOS account login validation. The public calendar ID and fetched page are not bundled.
+
 ## Reproducible checks
 
 ```powershell

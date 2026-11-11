@@ -32,6 +32,8 @@ jobs:
           python3 -m unittest -v test_core.py
       - name: Exercise native UI with synthetic data
         run: python3 macos/main.py --smoke-test
+        env:
+          CALENDAR_WIDGET_QA_DIR: macos/build/qa
       - name: Build and verify app bundle
         run: bash macos/build.sh
       - name: Check bundled CLI and application startup
@@ -44,3 +46,4 @@ jobs:
           path: |
             dist/*mac-*.zip
             dist/SHA256SUMS-mac-*.txt
+            macos/build/qa/*.png

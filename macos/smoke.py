@@ -11,11 +11,20 @@ def check(app,window):
     try:
         store=window.store; window.month='2026-11'; window.resize(700,410); window.repaint()
         assert len(window.hits)>0
+        import os
+        from pathlib import Path
+        qa=os.environ.get('CALENDAR_WIDGET_QA_DIR')
+        if qa:
+            Path(qa).mkdir(parents=True,exist_ok=True)
+            window.grab().save(str(Path(qa)/'compact-synthetic.png'))
         assert window.date_at(__import__('PySide6.QtCore',fromlist=['QPointF']).QPointF(10,70))=='2026-11-01'
         settings=Settings(window); before=copy.deepcopy(store.options)
         item=settings.list.item(0); item.setCheckState(Qt.CheckState.Unchecked); settings.capture()
         assert store.options==before and settings.draft['id_calendars'][0]['enabled']==False
         settings.reject(); assert store.options==before
+        if qa:
+            settings=Settings(window); settings.show(); app.processEvents()
+            settings.grab().save(str(Path(qa)/'settings-synthetic.png')); settings.reject()
         advanced=Advanced(before,window); advanced.checks['auto_sync'].setChecked(True); advanced.finish()
         assert advanced.result()==QDialog.DialogCode.Accepted and store.options==before
         window.detail.set_day('2026-11-02'); original=window.detail
@@ -29,6 +38,7 @@ def check(app,window):
         command(window,dict(command='set_emoji',key=context_key(event),icon='💬'))
         assert store.resolved(event)['icon']=='🌴'
         window.resize(1400,650); window.repaint(); assert len(window.hits)>0
+        if qa: window.grab().save(str(Path(qa)/'full-synthetic.png'))
         command(window,dict(command='sync_settings',enabled=False)); assert not store.options['auto_sync']
         command(window,dict(command='daily_summary',enabled=True,time='09:15')); assert store.options['summary_time']=='09:15'
         command(window,dict(command='delete_note',id=note['id'])); assert not store.data['notes']

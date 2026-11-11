@@ -9,7 +9,7 @@ info=plistlib.loads((root/'Contents/Info.plist').read_bytes())
 assert info['LSUIElement'] and info['NSAppleEventsUsageDescription']
 binary=root/'Contents/MacOS/GoogleCalendarWidget'
 requests=[dict(jsonrpc='2.0',id=1,method='initialize'),dict(jsonrpc='2.0',id=2,method='tools/list')]
-result=subprocess.run([str(binary),'--mcp'],input='\n'.join(map(json.dumps,requests))+'\n',text=True,capture_output=True,check=True)
+result=subprocess.run([str(binary),'--mcp'],input='\n'.join(map(json.dumps,requests))+'\n',text=True,encoding='utf-8',capture_output=True,check=True)
 lines=[json.loads(line) for line in result.stdout.splitlines()]
 assert len(lines)==2 and len(lines[1]['result']['tools'])==26
 for path in root.rglob('*'):

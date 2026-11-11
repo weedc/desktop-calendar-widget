@@ -542,13 +542,18 @@ class CalendarWindow(QWidget):
                 else:
                     chip=QRectF(x+5,y+27+slot*24,cw-10,22)
                     text=('★ ' if self.store.important(item) else '') + ('' if item['allDay'] else item['time']+' ') + item['title']
+                    if slots==1 and len(items)>count: text+='  +'+str(len(items)-count)
                 p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#b58b48' if self.store.important(item) else item.get('color','#607eb5')))
                 p.drawRoundedRect(chip,5,5); p.setPen(QColor('#ffffff')); p.setFont(QFont('Apple Color Emoji' if compact and sys.platform=='darwin' else 'Arial',14 if compact else self.store.options['font_size']))
                 p.drawText(chip.adjusted(3,0,-3,0),Qt.AlignmentFlag.AlignCenter if compact else Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,int(chip.width()-6)))
                 self.hits.append((chip,item['time']+' '+item['title']+'\n'+item['calendarName'],day))
             if len(items)>count:
                 p.setFont(QFont('Arial',9)); p.setPen(QColor('#d5e8ef'))
-                p.drawText(QRectF(x+7,y+ch-21,cw-14,18),Qt.AlignmentFlag.AlignVCenter,'+'+str(len(items)-count))
+                if compact:
+                    cols=max(1,int((cw-12)//32))
+                    p.drawText(QRectF(x+6+(count%cols)*32,y+27+(count//cols)*24,29,22),Qt.AlignmentFlag.AlignCenter,'+'+str(len(items)-count))
+                elif slots>1:
+                    p.drawText(QRectF(x+7,y+27+count*24,cw-14,22),Qt.AlignmentFlag.AlignVCenter,'+'+str(len(items)-count))
         p.setFont(QFont('Arial',9)); p.setPen(QColor('#9bbfce'))
         footer=('1시간 자동 동기화' if self.store.options['auto_sync'] else '자동 동기화 꺼짐')+' · '+self.status
         p.drawText(QRectF(8,self.height()-24,self.width()-28,23),Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(footer,Qt.TextElideMode.ElideRight,self.width()-30)); p.end()

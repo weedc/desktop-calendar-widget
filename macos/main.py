@@ -8,6 +8,8 @@ from pathlib import Path
 
 
 def main():
+    for stream in (sys.stdin,sys.stdout,sys.stderr):
+        if stream is not None and hasattr(stream,'reconfigure'): stream.reconfigure(encoding='utf-8')
     from bridge import mcp,send
     if '--mcp' in sys.argv: mcp(); return
     if '--command' in sys.argv:

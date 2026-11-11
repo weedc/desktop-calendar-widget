@@ -1,7 +1,16 @@
 # Build on a Mac of the target architecture. No user data is collected.
 from pathlib import Path
+from importlib import metadata
 root = Path(SPECPATH)
-a = Analysis([str(root/'main.py')], pathex=[str(root)], binaries=[], datas=[],
+licenses=[(str(root/'THIRD_PARTY_NOTICES.md'),'ThirdPartyLicenses')]
+for name in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6','pyobjc-core',
+             'pyobjc-framework-Cocoa','pyobjc-framework-Quartz','pyobjc-framework-UserNotifications','tzdata'):
+    distribution=metadata.distribution(name)
+    for file in distribution.files or []:
+        if '/licenses/' in str(file).lower() or file.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT')):
+            source=distribution.locate_file(file)
+            if source.is_file(): licenses.append((str(source),'ThirdPartyLicenses/'+name+'/'+str(file.parent)))
+a = Analysis([str(root/'main.py')], pathex=[str(root)], binaries=[], datas=licenses,
              hiddenimports=['AppKit','Foundation','Quartz','UserNotifications'],
              hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=['PySide6.QtWebEngineCore',
              'PySide6.QtWebEngineWidgets','PySide6.QtQml','PySide6.QtQuick'], noarchive=False)
