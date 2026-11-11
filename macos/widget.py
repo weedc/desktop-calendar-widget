@@ -379,7 +379,7 @@ class CalendarWindow(QWidget):
         self.geometry_timer = QTimer(self); self.geometry_timer.setSingleShot(True); self.geometry_timer.timeout.connect(self.save_geometry)
         QShortcut(QKeySequence('F5'),self,activated=self.refresh)
         QShortcut(QKeySequence('Ctrl+R'),self,activated=self.refresh)
-        self.configure(); self.show()
+        self.show(); self.configure()
         if not demo:
             self.timer.start(20000)
             QTimer.singleShot(300, self.start)
@@ -397,6 +397,7 @@ class CalendarWindow(QWidget):
         self.tick()
 
     def configure(self):
+        if not self.store.options['auto_sync']: self.pending=[p for p in self.pending if not p[1]]
         self.setWindowOpacity(self.store.options['opacity']/100)
         self.pin_action.setChecked(self.store.options['desktop'])
         if not self.demo:
