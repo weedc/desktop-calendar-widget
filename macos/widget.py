@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 from PySide6.QtCore import Qt, QObject, Signal, QRunnable, QThreadPool, QTimer, QRectF, QUrl
-from PySide6.QtGui import QColor, QPainter, QPen, QFont, QIcon, QPixmap, QDesktopServices, QAction, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QLinearGradient, QPen, QFont, QIcon, QPixmap, QDesktopServices, QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QLineEdit, QListWidget, QListWidgetItem,
     QCheckBox, QFormLayout, QSlider, QSpinBox, QTimeEdit, QDialogButtonBox, QMessageBox,
@@ -359,10 +359,11 @@ class CalendarWindow(QWidget):
         self.setGeometry(*store.data['geometry']); self.pool = QThreadPool(self); self.pool.setMaxThreadCount(1)
         self.busy = False; self.pending = []; self.last_attempt = 0.0; self.month_attempts={}; self.status = '저장된 일정'; self.hits = []
         self.detail = DayDetails(self); self.settings_window = None; self.grip = QSizeGrip(self)
+        self.grip.setStyleSheet('background:transparent;')
         self.header = QWidget(self); self.header.setStyleSheet('background:transparent;')
         row = QHBoxLayout(self.header); row.setContentsMargins(0,0,0,0); row.setSpacing(0)
         for title, function in [('‹',lambda:self.move_month(-1)),('오늘',self.today),('›',lambda:self.move_month(1)),('↻',self.refresh),('↗',self.open_google),('⋯',self.settings),('─',self.hide)]:
-            control=button(title,function,row); control.setStyleSheet('QPushButton {background:transparent; padding:4px 7px; border:0;} QPushButton:hover {background:#426372;}')
+            control=button(title,function,row); control.setStyleSheet('QPushButton {background:transparent; padding:4px 7px; border:0; border-radius:10px;} QPushButton:hover {background:#365563;}')
         self.app_icon=self.icon(); self.setWindowIcon(self.app_icon)
         self.tray = QSystemTrayIcon(self.app_icon,self)
         menu = QMenu()
@@ -518,8 +519,14 @@ class CalendarWindow(QWidget):
 
     def paintEvent(self,event):
         p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(),QColor('#1c3542'))
-        p.fillRect(0,0,self.width(),35,QColor('#172f3c'))
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        p.fillRect(self.rect(),Qt.GlobalColor.transparent)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        outline=QPainterPath(); outline.addRoundedRect(QRectF(self.rect()).adjusted(0.5,0.5,-0.5,-0.5),20,20)
+        p.setClipPath(outline)
+        p.fillPath(outline,QColor('#1b3440'))
+        gradient=QLinearGradient(0,0,0,100); gradient.setColorAt(0,QColor('#254451')); gradient.setColorAt(1,QColor('#1b3440'))
+        p.fillRect(QRectF(0,0,self.width(),100),gradient)
         p.setPen(QColor('#d9eaf0')); p.setFont(QFont('Arial',11))
         title=' · '.join(s['name'] for s in self.store.sources() if s.get('enabled',True))
         p.drawPixmap(10,10,self.app_icon.pixmap(15,15))
@@ -535,12 +542,18 @@ class CalendarWindow(QWidget):
         for index,day in enumerate(days):
             x=5+(index%7)*cw; y=top+(index//7)*ch; rect=QRectF(x,y,cw,ch)
             if day in self.store.data['highlights']:
-                color=QColor(self.store.data['highlights'][day]); color.setAlpha(105); p.fillRect(rect,color)
-            p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(QColor('#4c6571'),0.7)); p.drawRect(rect)
+                color=QColor(self.store.data['highlights'][day]); color.setAlpha(75)
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(color); p.drawRoundedRect(rect.adjusted(3,3,-3,-3),9,9)
+            line=QColor('#79919c'); line.setAlpha(60); p.setPen(QPen(line,0.6))
+            if index%7<6: p.drawLine(rect.topRight(),rect.bottomRight())
+            if index//7<rows-1: p.drawLine(rect.bottomLeft(),rect.bottomRight())
+            p.setBrush(Qt.BrushStyle.NoBrush)
             p.setPen(QColor('#85a0ae' if day[:7]!=self.month else '#eeab98' if index%7==0 else '#e5eff4'))
             p.setFont(QFont('Arial',10,QFont.Weight.Bold)); caption=str(int(day[-2:]))
             if day==now().strftime('%Y-%m-%d'):
-                p.setPen(QPen(QColor('#78cad5'),1.5)); p.drawRect(rect.adjusted(0.7,0.7,-0.7,-0.7)); caption+='  오늘'
+                wash=QColor('#78cad5'); wash.setAlpha(18); p.setBrush(wash)
+                p.setPen(QPen(QColor('#70b8c6'),1)); p.drawRoundedRect(rect.adjusted(3,3,-3,-3),9,9)
+                p.setBrush(Qt.BrushStyle.NoBrush); caption+='  오늘'
             p.drawText(QRectF(x+6,y+3,cw-12,20),Qt.AlignmentFlag.AlignVCenter,caption)
             items=[e for e in events if e['date']==day]
             slots=max(1,int((ch-29)//24)); count=min(len(items),min(6,max(1,int((cw-12)//32)*slots)) if compact else slots)
@@ -553,8 +566,11 @@ class CalendarWindow(QWidget):
                     chip=QRectF(x+5,y+27+slot*24,cw-10,22)
                     text=('★ ' if self.store.important(item) else '') + ('' if item['allDay'] else item['time']+' ') + item['title']
                     if slots==1 and len(items)>count: text+='  +'+str(len(items)-count)
-                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor('#b58b48' if self.store.important(item) else item.get('color','#607eb5')))
-                p.drawRoundedRect(chip,5,5); p.setPen(QColor('#ffffff')); p.setFont(QFont('Apple Color Emoji' if compact and sys.platform=='darwin' else 'Arial',14 if compact else self.store.options['font_size']))
+                fill=QColor('#b58b48' if self.store.important(item) else item.get('color','#607eb5'))
+                fill.setAlpha(170 if self.store.important(item) or item.get('allDay') or item.get('isNote') else 100 if compact else 60)
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(fill)
+                p.drawRoundedRect(chip,8,8)
+                p.setPen(QColor('#eef5f7')); p.setFont(QFont('Apple Color Emoji' if compact and sys.platform=='darwin' else 'Arial',14 if compact else self.store.options['font_size']))
                 p.drawText(chip.adjusted(3,0,-3,0),Qt.AlignmentFlag.AlignCenter if compact else Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(text,Qt.TextElideMode.ElideRight,int(chip.width()-6)))
                 self.hits.append((chip,item['time']+' '+item['title']+'\n'+item['calendarName'],day))
             if len(items)>count:
@@ -566,7 +582,9 @@ class CalendarWindow(QWidget):
                     p.drawText(QRectF(x+7,y+27+count*24,cw-14,22),Qt.AlignmentFlag.AlignVCenter,'+'+str(len(items)-count))
         p.setFont(QFont('Arial',9)); p.setPen(QColor('#9bbfce'))
         footer=('1시간 자동 동기화' if self.store.options['auto_sync'] else '자동 동기화 꺼짐')+' · '+self.status
-        p.drawText(QRectF(8,self.height()-24,self.width()-28,23),Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(footer,Qt.TextElideMode.ElideRight,self.width()-30)); p.end()
+        p.drawText(QRectF(13,self.height()-24,self.width()-35,23),Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(footer,Qt.TextElideMode.ElideRight,self.width()-38))
+        p.setClipping(False); border=QColor('#7394a1'); border.setAlpha(90)
+        p.setPen(QPen(border,1)); p.setBrush(Qt.BrushStyle.NoBrush); p.drawPath(outline); p.end()
 
     def date_at(self,point):
         if not 65<=point.y()<self.height()-26 or not 5<=point.x()<self.width()-5: return None
