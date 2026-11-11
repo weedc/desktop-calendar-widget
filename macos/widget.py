@@ -30,8 +30,7 @@ QLineEdit,QTextEdit,QComboBox,QSpinBox,QTimeEdit { background:#233e4b; border:1p
 QListWidget,QTableWidget { background:#203a47; border:0; border-radius:8px; }
 QListWidget::item { padding:10px; } QListWidget::item:selected { background:#385969; }
 QCheckBox,QRadioButton { spacing:9px; background:transparent; padding:5px; }
-QCheckBox::indicator { width:17px; height:17px; border:1px solid #7297a6; border-radius:3px; background:#213b47; }
-QCheckBox::indicator:checked { image:none; background:#e1f5f6; border:5px solid #4e97af; }
+QCheckBox::indicator { width:17px; height:17px; }
 QScrollBar:vertical { width:7px; background:transparent; margin:0; }
 QScrollBar::handle:vertical { background:#4b6a79; border-radius:3px; min-height:30px; }
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
@@ -107,6 +106,11 @@ class Advanced(QDialog):
         notice = QLabel('변경은 돌아간 뒤 마지막 “적용 / 시작하기”를 눌러야 반영됩니다.\nChrome → 보기 → 개발자 → Apple Events의 JavaScript 허용이 필요합니다.')
         notice.setWordWrap(True); form.addRow(notice)
         self.codex = QCheckBox('적용 후 Codex · Dot 설정 열기'); form.addRow(self.codex)
+        main=getattr(owner,'owner',owner)
+        if main.notifications:
+            test=QPushButton('시스템 알림 테스트 · 가상 예시')
+            test.clicked.connect(lambda:main.notifications.send(dict(id='test-'+uuid.uuid4().hex,title='캘린더 알림 테스트',body='가상 예시입니다. 실제 일정은 변경하지 않습니다.',date=now().strftime('%Y-%m-%d')),lambda success:None))
+            form.addRow(test)
         scroll.setWidget(content); layout.addWidget(scroll)
         row = QHBoxLayout(); layout.addLayout(row)
         button('취소', self.reject, row); row.addStretch(); button('돌아가기', self.finish, row)
@@ -213,7 +217,7 @@ class Settings(QDialog):
         if self.busy: return
         if self.draft['mode']=='id' and self.id_edit.text().strip(): self.add_id()
         self.capture()
-        if not any(s.get('enabled',True) for s in self.draft[source_key(self.draft)]):
+        if not self.owner.store.options['setup_completed'] and not any(s.get('enabled',True) for s in self.draft[source_key(self.draft)]):
             self.status.setText('표시할 캘린더를 하나 이상 선택하세요.'); return
         self.draft['setup_completed'] = True
         try:
@@ -314,9 +318,11 @@ class DayDetails(QDialog):
         self.owner.store.save(); self.owner.update(); self.populate()
 
     def day_color(self):
-        color = QColorDialog.getColor(QColor('#547d8e'),self,'날짜 칸 색상 · 취소하면 기존 강조 해제')
-        if color.isValid(): self.owner.store.data['highlights'][self.day] = color.name()
-        else: self.owner.store.data['highlights'].pop(self.day,None)
+        choices=['강조 없음']+PALETTE
+        value,ok=QInputDialog.getItem(self,'날짜 칸 색상','개인 강조 색상',choices,0,False)
+        if not ok: return
+        if value=='강조 없음': self.owner.store.data['highlights'].pop(self.day,None)
+        else: self.owner.store.data['highlights'][self.day]=value
         self.owner.store.save(); self.owner.update()
 
     def emoji(self):
@@ -344,6 +350,7 @@ class DayDetails(QDialog):
 
 class CalendarWindow(QWidget):
     notified = Signal(object, bool)
+    notification_clicked = Signal(str)
     def __init__(self, store, demo=False):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.store = store; self.demo = demo; self.month = now().strftime('%Y-%m')
@@ -365,6 +372,8 @@ class CalendarWindow(QWidget):
         if not demo: self.tray.show()
         self.notifications = platform_mac.Notifications(lambda title,body:self.tray.showMessage(title,body)) if not demo else None
         self.notified.connect(self.notification_done)
+        self.notification_clicked.connect(lambda day:self.detail.set_day(day) if day_valid(day) else self.today())
+        if self.notifications: self.notifications.install_click_handler(self.notification_clicked.emit)
         self.alert_queue = []; self.sending = None; self.last_alert = -100.0
         self.timer = QTimer(self); self.timer.timeout.connect(self.tick)
         self.geometry_timer = QTimer(self); self.geometry_timer.setSingleShot(True); self.geometry_timer.timeout.connect(self.save_geometry)
@@ -413,12 +422,13 @@ class CalendarWindow(QWidget):
     def refresh(self):
         self.request_month(self.month)
 
-    def request_month(self,month):
+    def request_month(self,month,automatic=False):
         if self.demo: return
+        if automatic and not self.store.options['auto_sync']: return
         if not month_valid(month): raise ValueError('YYYY-MM 형식으로 입력하세요.')
         if self.busy:
-            if month in self.pending: self.pending.remove(month)
-            self.pending.append(month)
+            if not automatic: self.pending=[p for p in self.pending if p[1]]
+            self.pending=[p for p in self.pending if p[0]!=month]+[(month,automatic)]
             return
         sources=copy.deepcopy(self.store.sources()); email=self.store.options['account_email']
         if not any(s.get('enabled',True) for s in sources): self.status='표시할 캘린더가 없습니다'; self.update(); return
@@ -431,18 +441,18 @@ class CalendarWindow(QWidget):
                 self.status=('일부 읽기 실패 · ' if result['outcomes'] else '읽기 실패 · ')+ '; '.join(result['errors']) if result['errors'] else 'Google Calendar · '+now().strftime('%H:%M')+' 확인'
             self.busy=False; self.update()
             if self.detail.isVisible(): self.detail.populate()
-            if self.pending: self.request_month(self.pending.pop(0))
+            if self.pending: self.request_month(*self.pending.pop(0))
         def failed(message):
             self.busy=False; self.status=message; self.update()
-            if self.pending: self.request_month(self.pending.pop(0))
+            if self.pending: self.request_month(*self.pending.pop(0))
         self.pool.start(Job(lambda: GoogleReader().read_month(month,sources,email),finished,failed))
 
     def tick(self):
         if self.demo: return
         at=now(); current=at.strftime('%Y-%m')
         if self.store.options['auto_sync'] and time.monotonic()-self.last_attempt>=3600:
-            self.request_month(self.month)
-            if current!=self.month and current not in self.pending: self.pending.append(current)
+            self.request_month(self.month,automatic=True)
+            if current!=self.month and current not in [p[0] for p in self.pending]: self.pending.append((current,True))
         queued={a['id'] for a in self.alert_queue}
         if self.sending: queued.add(self.sending['id'])
         for alert in self.store.notifications(at):
@@ -516,7 +526,7 @@ class CalendarWindow(QWidget):
             x=5+(index%7)*cw; y=top+(index//7)*ch; rect=QRectF(x,y,cw,ch)
             if day in self.store.data['highlights']:
                 color=QColor(self.store.data['highlights'][day]); color.setAlpha(105); p.fillRect(rect,color)
-            p.setPen(QPen(QColor('#4c6571'),0.7)); p.drawRect(rect)
+            p.setBrush(Qt.BrushStyle.NoBrush); p.setPen(QPen(QColor('#4c6571'),0.7)); p.drawRect(rect)
             p.setPen(QColor('#85a0ae' if day[:7]!=self.month else '#eeab98' if index%7==0 else '#e5eff4'))
             p.setFont(QFont('Arial',10,QFont.Weight.Bold)); caption=str(int(day[-2:]))
             if day==now().strftime('%Y-%m-%d'):
@@ -528,8 +538,7 @@ class CalendarWindow(QWidget):
             for slot,item in enumerate(items[:count]):
                 if compact:
                     cols=max(1,int((cw-12)//32)); chip=QRectF(x+6+(slot%cols)*32,y+27+(slot//cols)*24,29,22)
-                    text=self.store.resolved(item)['icon']; activity=self.store.resolved(item).get('activity','')
-                    if activity and activity!=text: text+=activity
+                    text=self.store.resolved(item)['icon']
                 else:
                     chip=QRectF(x+5,y+27+slot*24,cw-10,22)
                     text=('★ ' if self.store.important(item) else '') + ('' if item['allDay'] else item['time']+' ') + item['title']

@@ -192,6 +192,8 @@ class Store:
                 raise ValueError('비어 있거나 중복된 캘린더 ID입니다.')
             ids.add(source['id'])
         # Copy options only: async sync, notes and delivered notifications are preserved.
+        if draft['summary_time'] != self.options['summary_time'] or (draft['daily_summary'] and not self.options['daily_summary']):
+            self.data['summary_checked'] = ''
         self.data['options'] = copy.deepcopy(draft)
         self.save()
 

@@ -78,6 +78,14 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(self.store.notifications(at+timedelta(minutes=1)),[])
         self.assertEqual(self.store.notifications(datetime(2026,11,4,9,0,tzinfo=SEOUL)),[])
 
+    def test_summary_time_change_reschedules_but_same_save_does_not(self):
+        self.store.data['summary_checked']='2026-11-02'
+        draft=copy.deepcopy(self.store.options)
+        self.store.apply_options(draft)
+        self.assertEqual(self.store.data['summary_checked'],'2026-11-02')
+        draft['summary_time']='09:30'; self.store.apply_options(draft)
+        self.assertEqual(self.store.data['summary_checked'],'')
+
     def test_hour_notification_actual_remaining(self):
         self.store.options.update(hour_reminders=True,daily_summary=False)
         at=datetime(2026,11,2,9,7,tzinfo=SEOUL)

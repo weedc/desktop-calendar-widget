@@ -20,7 +20,8 @@ SNAPSHOT_JS = r'''(() => {
   const m = header && header.match(/(\d{4})년\s*(\d{1,2})월/);
   const cells = labels.filter(e=>/^일정 (?:\d+개|없음),\s*\d{1,2}월\s*\d{1,2}일/.test(e.getAttribute('aria-label')))
     .map(e=>({label:e.getAttribute('aria-label'), events:[...e.querySelectorAll('[aria-label]')]
-       .map(b=>b.getAttribute('aria-label')).filter(s=>s.includes(', 캘린더: '))}));
+       .map(b=>b.getAttribute('aria-label')).filter(s=>s.includes(', 캘린더: ')),
+       more:[...e.querySelectorAll('button,[role="button"]')].some(b=>!/캘린더:/.test(b.getAttribute('aria-label')||'') && /더보기|더 보기|개 더|more/i.test((b.getAttribute('aria-label')||'')+' '+b.innerText))}));
   const busy = labels.some(e=>e.getAttribute('role')==='progressbar' && /로드/.test(e.getAttribute('aria-label')));
   return JSON.stringify({month:m ? m[1]+'-'+m[2].padStart(2,'0') : '', cells, busy});
 })()'''
@@ -54,7 +55,7 @@ class GoogleReader:
         if urlparse(url).hostname != 'calendar.google.com':
             raise ValueError('Google Calendar 공식 주소만 열 수 있습니다.')
         self.window_id = int(self.apple('tell application "Google Chrome"\n'
-            'set w to make new window\nset URL of active tab of w to ' + self.quote(url) + '\nreturn id of w\nend tell'))
+            'set w to make new window\nset bounds of w to {80, 80, 1560, 1680}\nset URL of active tab of w to ' + self.quote(url) + '\nreturn id of w\nend tell'))
 
     def js(self, source):
         if self.window_id is None:
@@ -62,14 +63,15 @@ class GoogleReader:
         # Address an owned ID, never the front/active window belonging to the user.
         return self.apple('tell application "Google Chrome"\nset w to window id ' + str(self.window_id) +
             '\nset u to URL of active tab of w\nif u does not start with "https://calendar.google.com/" then error "Google 로그인을 완료한 뒤 연결 버튼을 다시 누르세요."\n'
-            'return execute active tab of w javascript ' + self.quote(source) + '\nend tell')
+            'return execute active tab of w javascript ' + self.quote('if(location.href.includes('+json.dumps(self.tag)+')) window.__desktopCalendarOwner='+json.dumps(self.tag)+';\n'+source) + '\nend tell')
 
     def close(self):
         if self.window_id is not None:
             try:
                 # A window navigated away by its user is no longer ours to close.
                 self.apple('tell application "Google Chrome"\nset w to window id ' + str(self.window_id) +
-                    '\nif (URL of active tab of w) contains ' + self.quote(self.tag) + ' then close w\nend tell')
+                    '\nset u to URL of active tab of w\nif u contains ' + self.quote(self.tag) + ' then\nclose w\nelse if u starts with "https://calendar.google.com/" then\n'
+                    'set ownerTag to execute active tab of w javascript "window.__desktopCalendarOwner || \'\'"\nif ownerTag is ' + self.quote(self.tag) + ' then close w\nend if\nend tell')
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
             self.window_id = None
@@ -92,6 +94,17 @@ class GoogleReader:
                     if snapshot.get('month') == month and len(snapshot.get('cells', [])) >= 28 and not snapshot.get('busy'):
                         break
                     time.sleep(0.4)
+                # Expand Google's day-overflow popup to avoid dropping hidden events.
+                for cell in (snapshot or {}).get('cells',[]):
+                    if not cell.get('more'): continue
+                    label=json.dumps(cell['label'])
+                    clicked=self.js('(() => {const c=[...document.querySelectorAll("[aria-label]")].find(e=>e.getAttribute("aria-label")==='+label+');if(!c)return false;const b=[...c.querySelectorAll(\'button,[role="button"]\')].find(b=>!/캘린더:/.test(b.getAttribute("aria-label")||"") && /더보기|더 보기|개 더|more/i.test((b.getAttribute("aria-label")||"")+" "+b.innerText));if(b){b.click();return true;}return false;})()')
+                    if clicked!='true': raise RuntimeError('숨겨진 일정을 펼치지 못했습니다. Google 화면 구조를 확인하세요.')
+                    time.sleep(0.25)
+                    expanded=json.loads(self.js('JSON.stringify([...document.querySelectorAll(\'[role="dialog"] [aria-label]\')].map(e=>e.getAttribute("aria-label")).filter(s=>s.includes(", 캘린더: ")))'))
+                    if not expanded: raise RuntimeError('숨겨진 일정 목록을 읽지 못했습니다. 기존 캐시를 유지합니다.')
+                    cell['events']=list(dict.fromkeys(cell['events']+expanded))
+                    self.js('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",code:"Escape",keyCode:27,bubbles:true})); "closed"')
                 successes[source['id']] = parse_snapshot(snapshot or {}, month, source)
                 self.close()
             except Exception as error:
@@ -106,7 +119,7 @@ class GoogleReader:
         self.open('https://calendar.google.com/calendar/u/0/r/settings?' + urlencode(query))
         items = []
         for _ in range(40):
-            items = json.loads(self.js('JSON.stringify([...document.querySelectorAll(\'[role="treeitem"]\')].map(e=>e.getAttribute("aria-label")||e.innerText.trim()).filter(Boolean))'))
+            items = json.loads(self.js('(() => {for(const e of document.querySelectorAll(\'[role="treeitem"][aria-expanded="false"]\')){if(/캘린더의 설정|Settings for my calendars|Other calendars/i.test(e.getAttribute("aria-label")||e.innerText))e.click();}return JSON.stringify([...document.querySelectorAll(\'[role="treeitem"]\')].map(e=>e.getAttribute("aria-label")||e.innerText.trim()).filter(Boolean));})()'))
             if len(items) > 2:
                 break
             time.sleep(0.4)
@@ -119,6 +132,8 @@ class GoogleReader:
             clicked = self.js('(() => {const label=' + arg + '; const e=[...document.querySelectorAll(\'[role="treeitem"]\')].find(e=>(e.getAttribute("aria-label")||e.innerText.trim())===label);if(e){e.click();return "ok";}return "";})()')
             if not clicked:
                 continue
+            time.sleep(0.35)
+            match=None
             for _ in range(12):
                 route = self.js('location.href')
                 match = re.search(r'/settings/calendar/([^/?#]+)', route)

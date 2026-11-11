@@ -57,6 +57,22 @@ class Notifications:
             from UserNotifications import UNUserNotificationCenter
             self.center = UNUserNotificationCenter.currentNotificationCenter()
 
+    def install_click_handler(self,callback):
+        if not self.center: return
+        import objc
+        from Foundation import NSObject
+        from UserNotifications import (UNNotificationPresentationOptionBanner,
+                                       UNNotificationPresentationOptionList,
+                                       UNNotificationPresentationOptionSound)
+        class CalendarNotificationDelegate(NSObject, protocols=[objc.protocolNamed('UNUserNotificationCenterDelegate')]):
+            def userNotificationCenter_didReceiveNotificationResponse_withCompletionHandler_(self,center,response,complete):
+                day=response.notification().request().content().userInfo().get('date','')
+                callback(str(day)); complete()
+            def userNotificationCenter_willPresentNotification_withCompletionHandler_(self,center,notification,complete):
+                complete(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList | UNNotificationPresentationOptionSound)
+        self.delegate=CalendarNotificationDelegate.alloc().init()
+        self.center.setDelegate_(self.delegate)
+
     def authorize(self):
         if self.center:
             from UserNotifications import UNAuthorizationOptionAlert, UNAuthorizationOptionSound

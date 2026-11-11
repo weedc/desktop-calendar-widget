@@ -46,6 +46,10 @@ def check(app,window):
             assert native.level()==AppKit.NSNormalWindowLevel
             window.tray.show(); assert window.tray.isVisible(); window.hide(); window.show()
             window.tray.hide()
+            if getattr(sys,'frozen',False):
+                notifications=platform_mac.Notifications(lambda title,body:None)
+                notifications.install_click_handler(lambda day:None)
+                assert notifications.center.delegate() is not None
         print('PASS: Qt rendering, staged settings/cancel, advanced draft, reused details, notes, highlights, emoji protection, sync and summary commands',flush=True)
         app.exit(0)
     except Exception:
