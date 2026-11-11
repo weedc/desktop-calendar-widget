@@ -1,6 +1,14 @@
 # Build and validation
 
-This release contains native desktop widget source and generic documentation. Calendar data, account identifiers, local verification logs, screenshots, and old prototypes are excluded.
+This release contains desktop widget source and generic documentation. Calendar data, account identifiers, local verification logs, and old prototypes are excluded. The sole image exception is root `ex.png`, explicitly reviewed and approved for publication by its owner; other screenshots remain excluded.
+
+## macOS port
+
+The separate `macos/` application uses Qt widgets and custom calendar painting, AppKit desktop window levels/all-Spaces behavior, a menu bar icon, local UserNotifications, and user-owned LaunchAgent startup. Existing Windows C# sources and installer behavior are preserved.
+
+Run `python3 -m unittest discover -s macos -p test_core.py -v` for model tests and `python3 macos/main.py --smoke-test` for synthetic UI checks. The macOS workflow builds both Apple Silicon and Intel apps, verifies signatures and packaged MCP framing, and exercises actual desktop window levels, all-Spaces flags, menu bar visibility, staged checkboxes, Apply/Cancel behavior, day-panel reuse, local notes, highlights, and manual emoji protection. These checks do not use Google credentials or real calendars.
+
+The Chrome adapter reads official Google Calendar accessible DOM labels using user-authorized Apple Events. Live macOS Google login, private calendar access, notification permission/visible delivery, and Mission Control/Stage Manager transitions require a signed-in Mac and are not represented as completed by synthetic tests. Site markup changes may require adapter maintenance. Bundles are ad-hoc signed, without Developer ID notarization. macOS 14 or later is required.
 
 ## Reproducible checks
 

@@ -4,6 +4,29 @@ Windows 바탕화면에 붙이는 독립 실행 앱으로, Google 캘린더 일�
 
 Google 일정 읽기에는 두 방식 중 하나를 선택하며, 아래에 설명합니다.
 
+작은 창에서는 아래처럼 일정 맥락을 이모지로 표시하고, 창을 넓히면 일정 원문을 표시합니다.
+
+![작은 창에서 이모지로 표시한 캘린더 위젯](ex.png)
+
+## macOS 버전
+
+Windows 버전은 그대로 유지하며, Mac용 앱은 `macos/`에 별도로 구현했습니다. **macOS 14 이상 · Apple Silicon / Intel**을 대상으로 합니다. 같은 색상과 간단한 최초 설정, 투명도·이동·크기 조절·달 이동, 바탕화면 고정, 메뉴 막대 아이콘, 날짜 상세창, 개인 메모·중요 표시, 작은 창의 이모지, 1시간 자동 동기화와 수동 새로고침을 제공합니다. Mac에서도 넓은 창은 요약명 없이 원문을 표시합니다.
+
+1. [배포 파일](https://github.com/weedc/desktop-calendar-widget/releases)에서 Mac의 칩에 맞는 ZIP을 받습니다. Apple Silicon은 `mac-arm64`, Intel은 `mac-x86_64`입니다.
+2. **Team Calendar Widget.app**을 **응용 프로그램**으로 옮겨 실행합니다. 독립 실행 앱입니다. 최초 실행 차단이 나타나면 시스템 설정 → 개인정보 보호 및 보안에서 이 앱의 열기를 허용합니다. 현재 배포는 개발자 서명·공증 전입니다.
+3. **Google 계정 연결 또는 캘린더 ID 입력 → 캘린더 선택 → 시작하기**를 진행합니다. Google Chrome의 기존 로그인 계정을 사용합니다. Mac의 **Chrome 제어(자동화) 권한**을 허용하고, Chrome **보기 → 개발자 → Apple Events의 JavaScript 허용**을 켜야 공식 Google 화면을 읽을 수 있습니다. 앱은 이 권한을 대신 켜거나 비밀번호·쿠키·토큰을 추출하지 않습니다.
+4. 로그인이나 권한이 필요하면 열린 Google 화면에서 완료한 뒤 연결 버튼을 다시 누릅니다. 체크와 고급 설정은 마지막 **시작하기 / 적용**에서만 저장합니다.
+
+바탕화면 고정은 macOS의 바탕화면 창 높이와 모든 Spaces 표시를 사용합니다. 다른 앱은 위젯 위에 열립니다. 숨긴 위젯은 **메뉴 막대 아이콘**에서 복원합니다. 시스템의 ‘바탕화면 보기’ 애니메이션, 전체 화면 앱과 Stage Manager의 표시는 macOS 정책에 영향을 받습니다.
+
+알림은 **macOS 시스템 알림**입니다. 매일 요약 시각과 시작 1시간 전 알림은 독립적으로 설정하며, 시각은 Windows와 같이 **Asia/Seoul**입니다. 알림 권한과 실행 중인 앱, 깨어 있는 Mac이 필요합니다. Codex 예약은 만들지 않습니다. 로그인 시 자동 실행은 이 앱 전용 사용자 LaunchAgent로 등록합니다.
+
+Mac 데이터는 `~/Library/Application Support/DesktopCalendarWidget`에만 저장합니다. Windows 개인 데이터는 배포하지 않으며 Mac으로 자동 복사하지 않습니다. 선택적 Codex 연결은 26개 도구의 MCP stdio와 사용자 전용 Unix 소켓을 사용합니다. 다른 Codex 설정은 보존하고 변경 전 백업합니다. Google 읽기에는 위젯이 만든 Chrome 창만 사용하며, 동기화 실패 시 마지막 데이터를 보존합니다.
+
+Mac에서 소스로 빌드하려면 Python 3.12로 `bash macos/build.sh`를 실행합니다. Python·Qt 런타임은 배포 앱에 포함됩니다. Apple Silicon·Intel 빌드와 합성 일정 검사는 [macOS 빌드](https://github.com/weedc/desktop-calendar-widget/actions/workflows/macos.yml)에서 실행합니다. 실제 Google 로그인과 개인 계정 읽기는 자동 검사에 포함하지 않습니다.
+
+아래의 트레이·Windows 접근성 인터페이스·named pipe·PowerShell 설치 안내는 기존 Windows 버전 기준입니다.
+
 바탕화면의 **팀 캘린더 위젯**을 실행하고 상단 **⋯**를 엽니다. 새 설치에서는 **시작하기**를 마칠 때까지 최초 설정이 열리며, 설정을 마친 뒤에는 필요할 때 **⋯**에서 다시 엽니다.
 
 최초 설정은 **Google 계정 연결 또는 캘린더 ID 입력 → 캘린더 선택 → 시작하기**의 세 단계입니다. 알림·투명도·글자 크기·자동 동기화·자동 실행 등은 **고급 설정**에서 바꿉니다.
