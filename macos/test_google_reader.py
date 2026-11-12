@@ -131,6 +131,12 @@ class BrowserTests(unittest.TestCase):
     def test_apple_script_quoting_preserves_unicode_as_data(self):
         value='한글 "문장"\n끝\\기호'
         escaped=quote(value); self.assertIn('한글',escaped); self.assertNotIn('\n',escaped); self.assertTrue(escaped.startswith('"') and escaped.endswith('"'))
+    def test_script_timeout_is_reported_without_private_script_contents(self):
+        browser=GoogleBrowser()
+        with patch('google_browser.sys.platform','darwin'), patch('google_browser.subprocess.run',side_effect=subprocess.TimeoutExpired(['osascript','private-script'],35)):
+            with self.assertRaises(RuntimeError) as caught: browser.apple('private-script')
+        self.assertNotIn('private-script',str(caught.exception)); self.assertIn('자동화',str(caught.exception))
+
     def test_shared_dom_programs_are_synchronous_for_apple_events(self):
         self.assertEqual(set(SCRIPTS),{'snapshot','expand','expanded','dismiss','catalog','select','route'})
         for program in SCRIPTS.values(): self.assertNotIn('async ',program)
@@ -153,20 +159,31 @@ class NativeMacTests(unittest.TestCase):
         self.assertEqual(probe(),'false')
 
     def test_c_real_hidden_window_reuses_without_visibility_or_recreation(self):
-        import os,time,threading
+        import os,time,threading,signal
         from urllib.parse import urlencode
         if os.environ.get('CALENDAR_WIDGET_NATIVE_CHROME_TEST')!='1': self.skipTest('native Chrome window test is opt-in')
         state=subprocess.run(['/usr/bin/osascript','-e','application "Google Chrome" is running'],capture_output=True,text=True,check=True).stdout.strip()
         if state!='false': self.skipTest('preserve an existing Chrome session')
-        import Quartz
+        import Quartz,AppKit
         browser=GoogleBrowser(); stop=threading.Event(); exposed=[]; sampler=None
         with tempfile.TemporaryDirectory(prefix='calendar-native-chrome-') as folder:
-            process=subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','--no-first-run','--no-default-browser-check','--disable-background-mode','--user-data-dir='+folder,'about:blank'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            subprocess.run(['/usr/bin/open','-n','-a','/Applications/Google Chrome.app','--args','--no-first-run','--no-default-browser-check','--disable-background-mode','--user-data-dir='+folder,'about:blank'],check=True,capture_output=True)
+            application=None
+            for _ in range(100):
+                apps=AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_('com.google.Chrome')
+                if apps: application=apps[0]; break
+                time.sleep(.1)
+            self.assertIsNotNone(application,'Chrome did not start through Launch Services')
+            process_id=application.processIdentifier()
             def onscreen():
-                return {w[Quartz.kCGWindowNumber] for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly,Quartz.kCGNullWindowID) if w.get(Quartz.kCGWindowOwnerPID)==process.pid and w.get(Quartz.kCGWindowLayer)==0}
+                return {w[Quartz.kCGWindowNumber] for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly,Quartz.kCGNullWindowID) if w.get(Quartz.kCGWindowOwnerPID)==process_id and w.get(Quartz.kCGWindowLayer)==0}
             def url(month):
                 return 'https://calendar.google.com/calendar/embed?'+urlencode(dict(src='en.usa#holiday@group.v.calendar.google.com',hl='ko',dates=month+'01/'+month+'28',widget_reader=browser.tag))
             try:
+                for _ in range(150):
+                    if onscreen(): break
+                    time.sleep(.1)
+                self.assertTrue(onscreen(),'Chrome did not create its initial test window')
                 try:
                     browser.navigate(url('202611'))
                     for _ in range(100):
@@ -179,6 +196,7 @@ class NativeMacTests(unittest.TestCase):
                     raise
                 owned=browser.window_id
                 count=browser.apple('tell application "Google Chrome" to return count of windows')
+                time.sleep(.3)
                 baseline=onscreen()
                 def sample():
                     while not stop.is_set():
@@ -197,14 +215,26 @@ class NativeMacTests(unittest.TestCase):
                 for _ in range(3):
                     with self.assertRaises(RuntimeError): browser.navigate(url('202611'))
                 self.assertEqual(browser.apple('tell application "Google Chrome" to return count of windows'),remaining)
+            except Exception:
+                if os.environ.get('GITHUB_ACTIONS')=='true':
+                    output=Path('build/qa'); output.mkdir(parents=True,exist_ok=True)
+                    subprocess.run(['/usr/sbin/screencapture','-x',str(output/'native-window-debug.png')],capture_output=True,timeout=8)
+                    names={w.get(Quartz.kCGWindowOwnerName,'') for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly,Quartz.kCGNullWindowID)}
+                    print('Native Chrome probe visible owners:',sorted(names))
+                raise
             finally:
                 stop.set()
                 if sampler: sampler.join(timeout=3)
                 browser.close()
-                if process.poll() is None:
-                    process.terminate()
-                    try: process.wait(timeout=5)
-                    except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
+                if not application.isTerminated():
+                    try: os.kill(process_id,signal.SIGTERM)
+                    except ProcessLookupError: pass
+                    for _ in range(50):
+                        if application.isTerminated(): break
+                        time.sleep(.1)
+                    if not application.isTerminated():
+                        try: os.kill(process_id,signal.SIGKILL)
+                        except ProcessLookupError: pass
 
 
 if __name__=='__main__': unittest.main()

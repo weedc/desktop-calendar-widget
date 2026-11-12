@@ -35,7 +35,10 @@ class GoogleBrowser:
 
     def apple(self,script):
         if sys.platform!='darwin': raise RuntimeError('기존 Chrome 연결은 macOS 앱에서 사용할 수 있습니다.')
-        result=subprocess.run(['/usr/bin/osascript','-e',script],capture_output=True,text=True,encoding='utf-8',timeout=35)
+        try:
+            result=subprocess.run(['/usr/bin/osascript','-e',script],capture_output=True,text=True,encoding='utf-8',timeout=35)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('Chrome 응답 시간이 초과되었습니다. 저장된 일정을 유지합니다. Chrome의 자동화 권한을 확인한 뒤 설정에서 다시 연결해 주세요.') from None
         if result.returncode:
             if '-1743' in result.stderr:
                 raise RuntimeError('시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 캘린더의 Chrome 제어를 허용해 주세요.')
