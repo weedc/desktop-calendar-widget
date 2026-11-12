@@ -1,4 +1,4 @@
-"""Connection, refresh and failure-policy tests without credentials or Google traffic."""
+"""Retained Chrome window lifecycle; no credentials or real calendars in fixtures."""
 import base64
 import copy
 import json
@@ -6,185 +6,151 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from google_browser import GoogleBrowser, LoginRequired, official_url
+from google_browser import GoogleBrowser, LoginRequired, official_url, quote
 from google_reader import GoogleReader, SCRIPTS
 
 
-class FakeBrowser:
+class ScriptedChrome(GoogleBrowser):
     def __init__(self):
-        self.gate=threading.RLock(); self.urls=[]; self.error=None; self.login_calls=0
-    def navigate(self,url):
-        self.urls.append(url)
-        if self.error: raise self.error
-    def open_login(self,email=''): self.login_calls+=1
-    def close(self): pass
+        super().__init__(); self.scripts=[]; self.windows=set(); self.running=True
+        self.next_id=100; self.taken=False; self.fail_create=False; self.login=False; self.fail_evaluate=False
+    def apple(self,script):
+        self.scripts.append(script)
+        if 'make new window' in script:
+            if self.fail_create: raise RuntimeError('creation failed')
+            self.running=True; self.next_id+=1; self.windows.add(self.next_id); return str(self.next_id)
+        if not self.running or self.window_id not in self.windows or self.taken: raise RuntimeError('missing or unowned')
+        if 'close w' in script: self.windows.discard(self.window_id)
+        if 'return execute' in script:
+            if self.fail_evaluate: raise RuntimeError('permission denied')
+            if self.login: return 'WIDGET_LOGIN_REQUIRED'
+            return json.dumps({'ok':True})
+        return ''
+    @property
+    def creations(self): return sum('make new window' in script for script in self.scripts)
 
 
 class FixtureReader(GoogleReader):
     def __init__(self):
-        super().__init__(FakeBrowser())
+        super().__init__(ScriptedChrome()); self.calls=[]; self.expanded=[]; self.dismissed=False
         self.snapshot=dict(month='2026-11',busy=False,cells=[dict(label=f'일정 없음, 11월 {day}일',events=[],more=False) for day in range(1,29)])
-        self.calls=[]; self.expanded=[]
     def script(self,name,value=None):
         self.calls.append((name,value))
-        if name=='snapshot': return copy.deepcopy(self.snapshot)
-        if name=='expand': return True
-        if name=='expanded': return self.expanded
-        if name=='dismiss': return True
+        if name=='snapshot': self.dismissed=False; return copy.deepcopy(self.snapshot)
+        if name=='expand': self.dismissed=False; return True
+        if name=='expanded': return [] if self.dismissed else self.expanded
+        if name=='dismiss': self.dismissed=True; return True
         raise AssertionError(name)
 
 
 class ReaderTests(unittest.TestCase):
     sources=[dict(id='demo@example.invalid',name='가상 캘린더',enabled=True,color='#487F91')]
-    def setUp(self): self.sleep=patch('google_reader.time.sleep').start()
+    def setUp(self): patch('google_reader.time.sleep').start()
     def tearDown(self): patch.stopall()
-
-    def test_refresh_reads_new_documents_without_starting_login(self):
+    def test_refresh_and_multiple_month_requests_keep_one_hidden_window(self):
         reader=FixtureReader()
         for _ in range(3): self.assertEqual(reader.read_month('2026-11',self.sources)['errors'],[])
-        self.assertEqual(len(set(reader.browser.urls)),3)
-        self.assertEqual(reader.browser.login_calls,0)
-
-    def test_multiple_sources_share_one_browser(self):
+        self.assertEqual(reader.browser.creations,1); self.assertEqual(reader.browser.phase,'hidden'); self.assertEqual(reader.browser.window_id,101)
+        reads=reader.browser.scripts[2:]
+        self.assertFalse(any('make new window' in s or 'set visible of w to true' in s or 'activate' in s for s in reads))
+    def test_multiple_calendars_share_the_same_reader(self):
         reader=FixtureReader(); sources=self.sources+[{**self.sources[0],'id':'other@example.invalid'}]
         self.assertEqual(len(reader.read_month('2026-11',sources)['outcomes']),2)
-        self.assertEqual(len(reader.browser.urls),2)
-
-    def test_disabled_sources_never_start_a_read(self):
-        reader=FixtureReader(); self.assertEqual(reader.read_month('2026-11',[{**self.sources[0],'enabled':False}])['outcomes'],{})
-        self.assertEqual(reader.browser.urls,[])
-
-    def test_expired_login_never_opens_a_window_or_returns_empty_success(self):
-        reader=FixtureReader(); reader.browser.error=LoginRequired()
-        for _ in range(2):
-            result=reader.read_month('2026-11',self.sources)
-            self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{})
-        self.assertEqual(reader.browser.login_calls,0)
-
-    def test_network_error_is_failure_and_a_later_read_can_recover(self):
-        reader=FixtureReader(); reader.browser.error=OSError('offline')
-        self.assertTrue(reader.read_month('2026-11',self.sources)['errors'])
-        reader.browser.error=None
-        self.assertEqual(reader.read_month('2026-11',self.sources)['errors'],[])
-        self.assertEqual(reader.browser.login_calls,0)
-
-    def test_incomplete_page_does_not_clear_cached_events(self):
+        self.assertEqual(reader.browser.creations,1)
+    def test_disabled_sources_never_create_a_window(self):
+        reader=FixtureReader(); reader.read_month('2026-11',[{**self.sources[0],'enabled':False}]); self.assertEqual(reader.browser.creations,0)
+    def test_missing_window_is_never_recreated_by_repeated_reads(self):
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources); reader.browser.windows.clear()
+        for _ in range(3):
+            result=reader.read_month('2026-11',self.sources); self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{})
+        self.assertEqual(reader.browser.creations,1)
+    def test_closed_chrome_is_not_automatically_relaunched(self):
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources); reader.browser.running=False
+        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources)['errors'])
+        self.assertEqual(reader.browser.creations,1); self.assertFalse(reader.browser.running)
+    def test_user_taken_window_is_not_navigated_restored_or_closed(self):
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources); reader.browser.taken=True
+        self.assertTrue(reader.read_month('2026-11',self.sources)['errors']); reader.close()
+        self.assertIn(101,reader.browser.windows); self.assertEqual(reader.browser.creations,1)
+    def test_initial_failure_cannot_create_popup_on_next_poll(self):
+        reader=FixtureReader(); reader.browser.fail_create=True
+        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources)['errors'])
+        self.assertEqual(reader.browser.creations,1)
+    def test_incomplete_page_is_hidden_and_not_accepted_as_empty_success(self):
         reader=FixtureReader(); reader.snapshot['cells']=[]
         result=reader.read_month('2026-11',self.sources)
-        self.assertEqual(result['outcomes'],{}); self.assertTrue(result['errors'])
-
-    def test_overflow_events_are_expanded_before_accepting_snapshot(self):
+        self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{}); self.assertEqual(reader.browser.phase,'lost')
+        reader.read_month('2026-11',self.sources); self.assertEqual(reader.browser.creations,1)
+    def test_overflow_read_keeps_stable_ids_and_closes_popup(self):
         reader=FixtureReader(); reader.snapshot['cells'][0].update(label='일정 1개, 11월 1일',more=True)
         reader.expanded=['오후 2:30, 가상 미팅, 캘린더: 예시, 위치: 회의실, 2026년 11월 1일']
-        result=reader.read_month('2026-11',self.sources)
-        self.assertFalse(result['errors']); event=result['outcomes'][self.sources[0]['id']][0]
-        self.assertEqual(event['uid'],'DBD6656405DA940F708D'); self.assertEqual(event['sort'],870)
-        self.assertIn(('dismiss',None),reader.calls)
-
-    def test_missing_overflow_is_an_error_and_dialog_is_dismissed(self):
+        result=reader.read_month('2026-11',self.sources); self.assertFalse(result['errors'])
+        event=result['outcomes'][self.sources[0]['id']][0]
+        self.assertEqual(event['uid'],'DBD6656405DA940F708D'); self.assertEqual(event['sort'],870); self.assertTrue(reader.dismissed)
+    def test_failed_overflow_does_not_replace_cache_with_partial_data(self):
         reader=FixtureReader(); reader.snapshot['cells'][0].update(label='일정 2개, 11월 1일',more=True)
-        result=reader.read_month('2026-11',self.sources)
-        self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{})
-        self.assertIn(('dismiss',None),reader.calls)
-
-    def test_duplicate_calendar_names_keep_distinct_row_indices(self):
-        reader=GoogleReader(FakeBrowser()); selected=[]
-        def script(name,value=None):
-            if name=='catalog': return dict(email='demo@example.invalid',rows=[dict(label='동명 캘린더',index=2),dict(label='동명 캘린더',index=3)])
-            if name=='select': selected.append(value['index']); return True
-            if name=='route':
-                if not selected: return 'https://calendar.google.com/calendar/u/0/r/settings'
-                encoded=base64.urlsafe_b64encode(f'calendar{selected[-1]}@example.invalid'.encode()).decode().rstrip('=')
-                return 'https://calendar.google.com/calendar/u/0/r/settings/calendar/'+encoded
-            raise AssertionError(name)
-        reader.script=script
-        result=reader.discover('demo@example.invalid')
-        self.assertEqual(len(result['calendars']),2); self.assertEqual(selected,[2,3])
-
-    def test_discovery_mismatched_account_does_not_replace_selection(self):
-        reader=GoogleReader(FakeBrowser()); reader.script=Mock(return_value=dict(email='other@example.invalid',rows=[{}]))
-        with self.assertRaises(RuntimeError): reader.discover('wanted@example.invalid')
+        result=reader.read_month('2026-11',self.sources); self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{}); self.assertTrue(reader.dismissed)
+    def test_cancel_does_not_start_another_connection(self):
+        reader=FixtureReader(); reader.cancel(); self.assertEqual(reader.read_month('2026-11',self.sources)['outcomes'],{}); self.assertEqual(reader.browser.creations,0)
+    def test_only_explicit_reset_permits_a_new_first_connection(self):
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources); original=reader.browser
+        with patch('google_reader.GoogleBrowser',ScriptedChrome): reader.reset()
+        reader.read_month('2026-11',self.sources)
+        self.assertEqual(original.phase,'closed'); self.assertEqual(reader.browser.creations,1)
 
 
 class BrowserTests(unittest.TestCase):
-    def test_first_connection_requires_deliberate_login(self):
-        with tempfile.TemporaryDirectory() as folder:
-            browser=GoogleBrowser(Path(folder)/'profile')
-            with patch.object(browser,'launch') as launch, self.assertRaises(LoginRequired): browser.ensure()
-            launch.assert_not_called(); self.assertFalse(browser.profile.exists())
-
-    def test_interactive_and_background_modes_use_same_owned_profile(self):
-        browser=GoogleBrowser('/tmp/widget-profile',executable='chrome')
-        hidden=browser.arguments(True,'https://calendar.google.com/calendar/embed')
-        login=browser.arguments(False,'https://calendar.google.com/calendar/u/0/r/settings')
-        self.assertIn('--headless=new',hidden); self.assertIn('--remote-debugging-address=127.0.0.1',hidden)
-        self.assertFalse(any('--remote-debugging' in arg for arg in login))
-        self.assertEqual([a for a in hidden if a.startswith('--user-data-dir=')],[a for a in login if a.startswith('--user-data-dir=')])
-
-    def test_headless_launch_uses_non_gui_lifetime_guard(self):
-        browser=GoogleBrowser('/tmp/widget-profile',executable='chrome')
-        with patch('google_browser.subprocess.Popen') as popen:
-            browser.launch(True,'https://calendar.google.com/calendar/embed')
-            args,options=popen.call_args
-            self.assertIn('--google-background',args[0]); self.assertEqual(options['stdin'],subprocess.PIPE)
-            if sys.platform=='win32': self.assertEqual(options['creationflags'],subprocess.CREATE_NO_WINDOW)
-            else: self.assertTrue(options['start_new_session'])
-
-    def test_no_default_profile_or_apple_events_in_background_adapter(self):
-        self.assertFalse(official_url('https://calendar.google.com.example.invalid/'))
-        self.assertFalse(official_url('http://calendar.google.com/'))
-        browser=GoogleBrowser('/tmp/widget-profile',executable='chrome')
-        with patch.object(browser,'launch') as launch, self.assertRaises(ValueError): browser.navigate('https://example.invalid/')
-        launch.assert_not_called()
-
-    def test_open_login_stops_headless_and_does_not_enable_debugging(self):
-        with tempfile.TemporaryDirectory() as folder:
-            browser=GoogleBrowser(folder,executable='chrome')
-            process=Mock(); process.poll.return_value=None
-            with patch.object(browser,'launch',return_value=process) as launch, patch.object(browser,'close') as close:
-                browser.open_login('demo@example.invalid')
-                close.assert_called_once(); self.assertFalse(launch.call_args.args[0]); self.assertTrue(browser.login_started)
-                with self.assertRaises(RuntimeError): browser.open_login()
-                self.assertEqual(launch.call_count,1)
-
-    def test_login_origin_is_not_inspected_and_no_headful_fallback(self):
-        browser=GoogleBrowser('/tmp/widget-profile')
-        with patch.object(browser,'call',return_value={'result':{'value':{'widgetLoginRequired':True}}}) as call, patch.object(browser,'launch') as launch:
-            with self.assertRaises(LoginRequired): browser.evaluate('document.title')
-            self.assertIn("location.origin !== 'https://calendar.google.com'",call.call_args.args[1]['expression'])
-            launch.assert_not_called()
-
-    def test_cdp_ignores_events_and_unrelated_responses(self):
-        browser=GoogleBrowser('/tmp/widget-profile'); browser.session='owned-session'; browser.socket=Mock()
-        browser.socket.recv.side_effect=[json.dumps({'method':'Page.loadEventFired'}),json.dumps({'id':99,'result':{}}),json.dumps({'id':1,'result':{'value':'ok'}})]
-        self.assertEqual(browser.call('Runtime.evaluate',{'expression':'1'}),{'value':'ok'})
-        request=json.loads(browser.socket.send.call_args.args[0]); self.assertEqual(request['sessionId'],'owned-session')
-
-    def test_cdp_errors_never_become_success(self):
-        browser=GoogleBrowser('/tmp/widget-profile'); browser.socket=Mock(); browser.socket.recv.return_value=json.dumps({'id':1,'error':{'message':'failed'}})
-        with self.assertRaises(RuntimeError): browser.call('Page.navigate')
-
-    def test_close_never_terminates_interactive_login(self):
-        browser=GoogleBrowser('/tmp/widget-profile'); browser.login_process=Mock(); browser.close()
-        browser.login_process.terminate.assert_not_called(); browser.login_process.kill.assert_not_called()
-
-    def test_profile_in_use_blocks_launch_after_widget_restart(self):
-        with tempfile.TemporaryDirectory() as folder:
-            browser=GoogleBrowser(folder,executable='chrome'); (browser.profile/'widget-login-started').write_text('1')
-            process=Mock(); process.info={'name':'Google Chrome','username':'demo'}
-            process.cmdline.return_value=['chrome','--user-data-dir='+str(browser.profile)]
-            with patch('psutil.Process') as current, patch('psutil.process_iter',return_value=[process]), patch.object(browser,'launch') as launch:
-                current.return_value.username.return_value='demo'
-                with self.assertRaises(RuntimeError): browser.ensure()
-                launch.assert_not_called()
-
-    def test_shared_dom_programs_are_complete(self):
+    def test_background_scripts_guard_against_launching_a_stopped_chrome(self):
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.hide()
+        browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        self.assertTrue(browser.scripts[-1].startswith('if not (application "Google Chrome" is running)'))
+        self.assertNotIn('make new window',browser.scripts[-1]); self.assertNotIn('set visible of w to true',browser.scripts[-1])
+    def test_login_read_does_not_inspect_credentials(self):
+        browser=ScriptedChrome(); browser.navigate('https://accounts.google.com/ServiceLogin?continue='+browser.tag); browser.login=True
+        with self.assertRaises(LoginRequired): browser.evaluate('1')
+        self.assertIn('if u does not start with "https://calendar.google.com/" then return',browser.scripts[-1])
+        self.assertEqual(browser.creations,1)
+    def test_browser_uses_existing_chrome_without_debug_ports_or_private_profiles(self):
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        source='\n'.join(browser.scripts)
+        for unwanted in ('remote-debugging','user-data-dir','headless','minimized of w to false'): self.assertNotIn(unwanted,source)
+    def test_invalid_origin_does_not_touch_an_owned_window(self):
+        browser=ScriptedChrome()
+        with self.assertRaises(ValueError): browser.navigate('https://calendar.google.com.example.invalid/')
+        self.assertEqual(browser.scripts,[])
+    def test_closed_session_cannot_reopen(self):
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.hide(); browser.close()
+        with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed')
+        self.assertEqual(browser.creations,1)
+    def test_window_ownership_checked_before_navigation_and_close(self):
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.hide(); browser.close()
+        for script in browser.scripts[1:]: self.assertIn('WIDGET_WINDOW_TAKEN_OVER',script)
+    def test_apple_script_quoting_preserves_unicode_as_data(self):
+        value='한글 "문장"\n끝\\기호'
+        escaped=quote(value); self.assertIn('한글',escaped); self.assertNotIn('\n',escaped); self.assertTrue(escaped.startswith('"') and escaped.endswith('"'))
+    def test_shared_dom_programs_are_synchronous_for_apple_events(self):
         self.assertEqual(set(SCRIPTS),{'snapshot','expand','expanded','dismiss','catalog','select','route'})
-        for program in SCRIPTS.values(): self.assertNotIn('fetch(',program)
+        for program in SCRIPTS.values(): self.assertNotIn('async ',program)
+
+
+@unittest.skipUnless(sys.platform=='darwin' and Path('/Applications/Google Chrome.app').exists(),'requires native Mac with Chrome')
+class NativeMacTests(unittest.TestCase):
+    def test_b_compile_real_chrome_scripts(self):
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        browser.evaluate('({value:"가상 데이터"})'); browser.hide(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.close()
+        with tempfile.TemporaryDirectory() as folder:
+            for index,script in enumerate(browser.scripts):
+                result=subprocess.run(['/usr/bin/osacompile','-o',str(Path(folder)/f'check{index}.scpt')],input=script,text=True,encoding='utf-8',capture_output=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+    def test_a_read_failure_does_not_launch_stopped_chrome(self):
+        probe=lambda:subprocess.run(['/usr/bin/osascript','-e','application "Google Chrome" is running'],capture_output=True,text=True,check=True).stdout.strip()
+        if probe()!='false': self.skipTest('Chrome already running; preserve its windows')
+        browser=GoogleBrowser(); browser.phase='hidden'; browser.window_id=999999
+        with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        self.assertEqual(probe(),'false')
 
 
 if __name__=='__main__': unittest.main()

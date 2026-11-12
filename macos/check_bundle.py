@@ -6,7 +6,7 @@ from pathlib import Path
 
 root=Path(__file__).resolve().parent/'dist/Team Calendar Widget.app'
 info=plistlib.loads((root/'Contents/Info.plist').read_bytes())
-assert info['LSUIElement'] and 'NSAppleEventsUsageDescription' not in info
+assert info['LSUIElement'] and info.get('NSAppleEventsUsageDescription')
 assert list((root/'Contents').rglob('GoogleCalendarDom.json'))
 binary=root/'Contents/MacOS/GoogleCalendarWidget'
 requests=[dict(jsonrpc='2.0',id=1,method='initialize'),dict(jsonrpc='2.0',id=2,method='tools/list')]

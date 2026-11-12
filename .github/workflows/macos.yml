@@ -25,6 +25,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Provide Chrome scripting dictionary for native checks
+        run: |
+          if [ ! -d '/Applications/Google Chrome.app' ]; then brew install --cask google-chrome; fi
       - name: Install runtime and test model
         run: |
           python3 -m pip install -r macos/requirements.txt

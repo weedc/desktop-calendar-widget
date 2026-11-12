@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (QApplication, QWidget, QDialog, QVBoxLayout, QHBo
 from core import (Store, VERSION, PALETTE, now, days_for_month, context_key, source_key,
                   month_valid, day_valid, time_valid)
 from google_reader import GoogleReader
-from google_browser import LoginRequired
 import platform_mac
 
 STYLE = '''
@@ -118,7 +117,7 @@ class Advanced(QDialog):
         form.addRow('불투명도', self.opacity)
         self.font_size = QSpinBox(); self.font_size.setRange(8,20); self.font_size.setValue(draft['font_size'])
         form.addRow('글자 크기', self.font_size)
-        notice = QLabel('변경은 돌아간 뒤 마지막 “적용 / 시작하기”를 눌러야 반영됩니다.\nGoogle 로그인은 전용 Chrome 창에서 한 번 진행합니다. 동기화는 창 없이 실행됩니다.')
+        notice = QLabel('변경은 돌아간 뒤 마지막 “적용 / 시작하기”를 눌러야 반영됩니다.\n기존 Chrome 로그인을 사용합니다. Chrome 제어 권한과 Apple Events의 JavaScript 허용이 필요합니다.')
         notice.setWordWrap(True); form.addRow(notice)
         self.codex = QCheckBox('적용 후 Codex · Dot 설정 열기'); form.addRow(self.codex)
         main=getattr(owner,'owner',owner)
@@ -153,7 +152,7 @@ class Settings(QDialog):
         super().__init__(owner)
         self.owner = owner; self.draft = copy.deepcopy(owner.store.options)
         self.setWindowTitle('캘린더 시작하기' if not self.draft['setup_completed'] else '캘린더 설정')
-        self.resize(600, 540); self.open_codex = False; self.busy = False
+        self.resize(600, 540); self.open_codex = False; self.busy = False; self.connection_changed = False
         layout = QVBoxLayout(self); layout.setSpacing(16)
         layout.addWidget(QLabel('1. 연결 방식을 선택하세요'))
         row = QHBoxLayout(); layout.addLayout(row)
@@ -212,37 +211,21 @@ class Settings(QDialog):
         self.busy = busy
         for control in (self.connect_button,self.login_button,self.apply_button,self.account,self.direct): control.setEnabled(not busy)
 
-    def open_login(self):
-        if self.busy: return
-        if self.owner.busy:
-            self.status.setText('현재 동기화를 마친 뒤 다시 연결해 주세요.'); return
-        self.connection_busy(True)
-        email = self.draft['account_email']
-        def done(_):
-            self.connection_busy(False)
-            self.status.setText('전용 Chrome에서 로그인한 뒤 창을 닫아 주세요. 계정 방식은 연결 버튼을, ID 방식은 적용을 누르세요.')
-            self.connect_button.setText('로그인 완료 · 연결')
-        def error(message): self.connection_busy(False); self.status.setText(message)
-        self.owner.pool.start(Job(lambda:self.owner.google_reader.open_login(email),done,error))
+    def open_login(self): self.connect_account()
 
     def connect_account(self):
         if self.busy: return
         if self.owner.busy:
             self.status.setText('현재 동기화를 마친 뒤 다시 연결해 주세요.'); return
         self.capture(); self.connection_busy(True)
-        self.status.setText('전용 Google 연결에서 캘린더를 확인하는 중…')
+        self.status.setText('기존 Chrome 계정을 확인하는 중… 로그인 후 자동으로 돌아옵니다.')
         email = self.draft['account_email']
-        def connect():
-            try: return self.owner.google_reader.discover(email)
-            except LoginRequired:
-                self.owner.google_reader.open_login(email); return None
+        def connect(): return self.owner.google_reader.discover(email)
         def done(catalog):
             self.connection_busy(False)
-            if not catalog:
-                self.connect_button.setText('로그인 완료 · 연결')
-                self.status.setText('전용 Chrome에서 로그인한 뒤 창을 닫고 연결 버튼을 다시 누르세요.'); return
             old = {s['id']:s for s in self.draft['account_calendars']}
-            self.draft['account_calendars'] = [{**s, 'enabled':False, **old.get(s['id'],{})} for s in catalog['calendars']]
+            if self.draft['mode']=='account': self.draft['account_calendars'] = [{**s, 'enabled':False, **old.get(s['id'],{})} for s in catalog['calendars']]
+            self.connection_changed = True
             self.draft['account_email'] = catalog['email']; self.connect_button.setText('Google 계정 연결')
             self.populate(); self.status.setText('캘린더를 선택하고 시작하기 / 적용을 눌러 주세요.')
         def error(message): self.connection_busy(False); self.status.setText(message)
@@ -269,6 +252,7 @@ class Settings(QDialog):
             except Exception:
                 if previous['startup'] != self.draft['startup']: platform_mac.startup(previous['startup'])
                 raise
+            if self.connection_changed: self.owner.google_reader.reset()
             self.owner.configure()
             self.accept()
             self.owner.refresh()

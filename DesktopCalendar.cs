@@ -74,7 +74,6 @@ namespace TeamCalendar
                 Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log(e.Exception.ToString()); };
                 try { Application.Run(new CalendarWindow()); }
                 catch (Exception e) { Log(e.ToString()); MessageBox.Show(e.Message, "팀 캘린더 위젯"); }
-                finally { GoogleBrowser.Shared.Dispose(); }
             }
         }
         public static void Log(string message) { try { File.AppendAllText(Path.Combine(DataDir, "widget-v2.log"), DateTime.Now.ToString("s") + " " + message + Environment.NewLine); } catch { } }
@@ -111,53 +110,19 @@ namespace TeamCalendar
         public static string Str(Dictionary<string, object> d, string key, string fallback = "") { object value; return d.TryGetValue(key, out value) ? Convert.ToString(value, CultureInfo.InvariantCulture) : fallback; }
     }
 
-    // One headless browser is shared across all enabled calendars. There are
-    // no Win32 reader windows to show, reparent, activate or recover.
+    // Existing Chrome login, one initial connection and a retained hidden frame.
     sealed class CalendarReader : IDisposable
     {
         public readonly CalendarSource Source;
-        readonly GoogleBrowser browser;
-        bool disposed;
-        public CalendarReader(CalendarSource source) : this(source, GoogleBrowser.Shared) { }
-        internal CalendarReader(CalendarSource source, GoogleBrowser connection) { Source = source; browser = connection; }
-        public IntPtr Window { get { return IntPtr.Zero; } }
+        readonly ChromeReaderWindow connection;
+        public CalendarReader(CalendarSource source) { Source = source; connection = new ChromeReaderWindow(source); }
+        public IntPtr Window { get { return connection.Window; } }
         public MonthData Read(DateTime month, bool reload)
         {
-            if (disposed) throw new ObjectDisposedException("CalendarReader");
             month = new DateTime(month.Year, month.Month, 1);
-            lock (browser.Gate)
-            {
-                // A fresh document is fetched for every actual read, including
-                // manual refresh. Cached-only paths never call this method.
-                browser.Navigate(App.EmbedUrl(Source) + "&dates=" + month.ToString("yyyyMMdd") + "/" + month.AddMonths(1).AddDays(-1).ToString("yyyyMMdd") + "&widget_refresh=" + Guid.NewGuid().ToString("N"));
-                Dictionary<string, object> snapshot = null; int stable = 0;
-                var watch = Stopwatch.StartNew();
-                while (watch.ElapsedMilliseconds < 35000 && !disposed)
-                {
-                    snapshot = browser.Script("snapshot", null) as Dictionary<string, object>;
-                    object[] cells = snapshot == null || !snapshot.ContainsKey("cells") ? new object[0] : GoogleDom.Array(snapshot["cells"]);
-                    if (snapshot != null && App.Str(snapshot, "month") == month.ToString("yyyy-MM") && cells.Length >= 28 && !Convert.ToBoolean(snapshot["busy"])) { if (++stable >= 2) break; }
-                    else stable = 0;
-                    Thread.Sleep(400);
-                }
-                if (stable < 2) throw new InvalidOperationException("Google 일정 표를 읽지 못했습니다. 로그인과 접근 권한을 확인해 주세요. 기존 데이터를 유지합니다.");
-                foreach (Dictionary<string, object> cell in GoogleDom.Array(snapshot["cells"]))
-                {
-                    if (!Convert.ToBoolean(cell["more"])) continue;
-                    if (!Convert.ToBoolean(browser.Script("expand", App.Str(cell, "label")))) throw new InvalidOperationException("숨겨진 일정을 펼치지 못했습니다. 기존 데이터를 유지합니다.");
-                    try
-                    {
-                        object[] expanded = new object[0]; var count = Regex.Match(App.Str(cell, "label"), @"^일정 (\d+)개,"); int expected = count.Success ? int.Parse(count.Groups[1].Value) : 1; watch.Restart();
-                        while (watch.ElapsedMilliseconds < 5000) { expanded = GoogleDom.Array(browser.Script("expanded", null)); if (expanded.Select(Convert.ToString).Distinct().Count() >= expected) break; Thread.Sleep(200); }
-                        if (expanded.Length == 0) throw new InvalidOperationException("숨겨진 일정 목록을 읽지 못했습니다. 기존 데이터를 유지합니다.");
-                        cell["events"] = GoogleDom.Array(cell["events"]).Concat(expanded).Select(Convert.ToString).Distinct().Cast<object>().ToArray();
-                    }
-                    finally { if (!Convert.ToBoolean(browser.Script("dismiss", null))) throw new InvalidOperationException("일정 펼침 창을 닫지 못했습니다. 기존 데이터를 유지합니다."); }
-                }
-                var result = Parse(snapshot, month, Source);
-                App.Log("Headless read month=" + result.month + ", day occurrences=" + result.events.Count);
-                return result;
-            }
+            var result = Parse(connection.Snapshot(month, reload), month, Source);
+            App.Log("Existing Chrome read month=" + result.month + ", day occurrences=" + result.events.Count);
+            return result;
         }
         internal static MonthData Parse(Dictionary<string, object> snapshot, DateTime month, CalendarSource source)
         {
@@ -202,7 +167,7 @@ namespace TeamCalendar
             int hour = int.Parse(match.Groups[2].Value) % 12 + (match.Groups[1].Value == "오후" ? 12 : 0);
             return hour * 60 + (match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : 0);
         }
-        public void Dispose() { disposed = true; }
+        public void Dispose() { connection.Dispose(); }
     }
 
     sealed class EventHit { public Rectangle bounds; public CalendarEvent item; public DateTime day; }

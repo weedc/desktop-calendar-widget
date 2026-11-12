@@ -17,7 +17,7 @@ namespace TeamCalendar
             Work = App.Json.Deserialize<FeatureState>(App.Json.Serialize(state));
             Appearance = App.Json.Deserialize<Settings>(App.Json.Serialize(appearance));
             Appearance.Desktop = desktop; Startup = startup;
-            Profiles = (profiles ?? Enumerable.Empty<FeatureState.Profile>()).ToList();
+            Profiles = (profiles ?? ExistingChromeProfile.List()).ToList();
         }
         static List<CalendarSource> CopySources(List<CalendarSource> values) { return values.Select(c => new CalendarSource { id = c.id, name = c.name, color = c.color, enabled = c.enabled }).ToList(); }
         static void CopyOptions(FeatureState from, FeatureState to)

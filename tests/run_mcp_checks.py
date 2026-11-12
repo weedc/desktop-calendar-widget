@@ -29,7 +29,7 @@ assert result.returncode == 0, 'MCP process failed'
 rows = [json.loads(line) for line in result.stdout.decode('utf-8-sig').splitlines()]
 assert len(rows) == len(requests)-1, 'Notification must not receive a response'
 by_id = {x['id']: x for x in rows}
-assert by_id[1]['result']['serverInfo']['version'] == '5.6.1'
+assert by_id[1]['result']['serverInfo']['version'] == '5.7.0'
 assert by_id[2]['result'] == {}
 assert by_id[4]['error']['code'] == -32601
 tools = {x['name']: x for x in by_id[3]['result']['tools']}

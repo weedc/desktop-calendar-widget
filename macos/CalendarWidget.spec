@@ -4,7 +4,7 @@ from importlib import metadata
 root = Path(SPECPATH)
 licenses=[(str(root/'THIRD_PARTY_NOTICES.md'),'ThirdPartyLicenses')]
 for name in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6','pyobjc-core',
-             'pyobjc-framework-Cocoa','pyobjc-framework-Quartz','pyobjc-framework-UserNotifications','tzdata','websocket-client','psutil','certifi'):
+             'pyobjc-framework-Cocoa','pyobjc-framework-Quartz','pyobjc-framework-UserNotifications','tzdata','certifi'):
     distribution=metadata.distribution(name)
     for file in distribution.files or []:
         if '/licenses/' in str(file).lower() or file.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT')):
@@ -23,7 +23,8 @@ coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='GoogleCal
 app = BUNDLE(coll, name='Team Calendar Widget.app', icon=str(root/'build/calendar.icns'),
              bundle_identifier='io.github.weedc.desktop-calendar-widget',
              info_plist={'CFBundleName':'Team Calendar Widget','CFBundleDisplayName':'팀 캘린더 위젯',
-                 'CFBundleShortVersionString':'5.6.1','CFBundleVersion':'5.6.1',
+                 'CFBundleShortVersionString':'5.7.0','CFBundleVersion':'5.7.0',
                  'LSMinimumSystemVersion':'14.0','LSUIElement':True,
                  'NSHighResolutionCapable':True,
+                 'NSAppleEventsUsageDescription':'기존 Chrome 로그인으로 선택한 Google 캘린더를 읽습니다. 처음 연결한 읽기창을 숨겨 재사용합니다.',
                  'NSHumanReadableCopyright':'Desktop Calendar Widget contributors'})

@@ -37,14 +37,14 @@ namespace TeamCalendar
         {
             parent = pending; draft = new CalendarSettingsDraft(parent.Work, parent.Appearance, parent.Appearance.Desktop, parent.Startup, parent.Profiles) { OpenCodex = parent.OpenCodex };
             StartPosition = FormStartPosition.CenterParent;
-            Caption("전용 Google 연결", 22, 76, 315); Caption("계정 이메일 (선택)", 350, 76, 318);
+            Caption("기존 Chrome 계정", 22, 76, 315); Caption("계정 이메일 (선택)", 350, 76, 318);
             var login = Action("Google 로그인 열기", 22, 103, 310, async delegate
             {
-                string loginEmail = email.Text.Trim(); message.Text = "전용 로그인 창을 여는 중…";
+                string loginEmail = email.Text.Trim(), loginProfile = draft.Work.ActiveProfile(); message.Text = "Chrome 계정을 확인하는 중…";
                 try
                 {
-                    await System.Threading.Tasks.Task.Run(delegate { AccountDiscovery.OpenLogin("", loginEmail); });
-                    if (!IsDisposed) { ConnectionOpened = true; message.Text = "로그인을 마치고 전용 Chrome 창을 닫은 뒤 돌아가 적용해 주세요."; }
+                    var result = await System.Threading.Tasks.Task.Run(delegate { return AccountDiscovery.Read(loginProfile, loginEmail, null); });
+                    if (!IsDisposed) { ConnectionOpened = true; if (draft.Work.connectionMode == "account") draft.UseAccountCatalog(result); else { draft.Work.chromeProfile = result.profile; draft.Work.googleUser = result.email; } email.Text = result.email; ReloadCalendars(); message.Text = "Chrome 연결을 확인했습니다. 돌아간 뒤 적용해 주세요."; }
                 }
                 catch (Exception error) { if (!IsDisposed) message.Text = error.Message; }
             });

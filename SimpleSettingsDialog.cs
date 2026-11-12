@@ -42,11 +42,11 @@ namespace TeamCalendar
             idPanel = new Panel { Left = 0, Top = 152, Width = 620, Height = 93, BackColor = Design.Background }; Controls.Add(idPanel);
             connect = Action("Google 계정 연결", 22, 155, 245, delegate { ConnectAccount(); });
             var login = Action("Google 로그인 열기", 282, 155, 210, delegate { OpenLogin(); });
-            connection = Caption("Google에서 로그인하고 사용할 캘린더를 선택하세요.", 22, 202, 576); connection.Height = 42;
+            connection = Caption("기존 Chrome 로그인을 사용합니다. 연결되면 캘린더 목록으로 자동 전환합니다.", 22, 202, 576); connection.Height = 42;
             Reparent(accountPanel, connect); Reparent(accountPanel, login); Reparent(accountPanel, connection);
             calendarId = Field("구글 캘린더 ID", 22, 155, 421); var idField = calendarId.Parent;
             var add = Action("추가", 456, 154, 142, delegate { StageCalendarId(); });
-            var idHelp = Caption("비공개 캘린더는 전용 Google 로그인도 한 번 필요합니다.", 22, 202, 402);
+            var idHelp = Caption("기존 Chrome에서 이 캘린더에 접근할 수 있어야 합니다.", 22, 202, 402);
             var idLogin = Action("Google 로그인 열기", 442, 202, 156, delegate { OpenLogin(); }); idHelp.Height = 42;
             Reparent(idPanel, idField); Reparent(idPanel, add); Reparent(idPanel, idHelp); Reparent(idPanel, idLogin);
             Caption("2  표시할 캘린더 선택", 22, 261, 576);
@@ -75,7 +75,7 @@ namespace TeamCalendar
         {
             bool account = draft.Work.connectionMode == "account";
             accountPanel.Visible = account; idPanel.Visible = !account;
-            connection.Text = !GoogleBrowser.Shared.Verified ? "전용 Google 계정 연결을 한 번 확인해 주세요." : draft.Work.accountEmail == "" ? "Google에서 로그인하고 사용할 캘린더를 선택하세요." : "연결 계정 · " + draft.Work.accountEmail;
+            connection.Text = draft.Work.accountEmail == "" ? "기존 Chrome 로그인을 사용합니다. 연결되면 캘린더 목록으로 자동 전환합니다." : "연결 계정 · " + draft.Work.accountEmail;
         }
         void UpdateSelection() { selection.Text = draft.Work.ActiveCalendars().Count(c => c.enabled) + "개 선택 · ‘" + (firstRun ? "시작하기" : "적용") + "’ 후 표시합니다."; }
         void ReloadSources()
@@ -93,22 +93,26 @@ namespace TeamCalendar
         {
             if (connecting) return;
             connecting = true; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = false;
-            message.Text = "전용 Google 창에서 로그인한 뒤 창을 닫아 주세요.";
-            connection.Text = "전용 Google 로그인 창을 여는 중…";
+            string profile = draft.Work.ActiveProfile(), email = draft.Work.ActiveUser();
+            connection.Text = message.Text = "기존 Chrome 계정을 확인하는 중… 로그인 후 자동으로 돌아옵니다.";
             try
             {
-                await Task.Run(delegate { AccountDiscovery.OpenLogin("", draft.Work.ActiveUser()); });
-                if (!IsDisposed) { ConnectionChanged = true; connection.Text = "로그인한 뒤 Chrome 창을 닫고 ‘Google 계정 연결’을 다시 눌러주세요."; connect.Text = "로그인 완료 · 연결"; connect.AccessibleName = connect.Text; message.Text = draft.Work.connectionMode == "id" ? "Chrome 창을 닫고 적용한 뒤 새로고침해 주세요." : "Chrome 창을 닫고 ‘로그인 완료 · 연결’을 눌러주세요."; }
+                var result = await Task.Run(delegate { return AccountDiscovery.Read(profile,email,null); });
+                if (IsDisposed) return;
+                if (draft.Work.connectionMode == "account") draft.UseAccountCatalog(result);
+                else { draft.Work.chromeProfile = result.profile; draft.Work.googleUser = result.email; }
+                ConnectionChanged = true; UpdateMode(); ReloadSources();
+                message.Text = "Chrome 연결을 확인했습니다. ‘" + apply.Text + "’을 누르면 선택한 캘린더가 표시됩니다.";
             }
-            catch (Exception error) { if (!IsDisposed) connection.Text = error.Message; }
+            catch (Exception error) { if (!IsDisposed) connection.Text = message.Text = error.Message; }
             finally { if (!IsDisposed) { connecting = false; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = true; } }
         }
         async void ConnectAccount()
         {
             if (connecting) return;
             connecting = true; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = false;
-            string profile = draft.Work.accountProfile, email = draft.Work.accountEmail; int request = ++generation; bool needsLogin = false;
-            connection.Text = "Google 계정의 캘린더를 확인하고 있습니다…";
+            string profile = draft.Work.accountProfile, email = draft.Work.accountEmail; int request = ++generation;
+            connection.Text = "기존 Chrome 계정을 확인하는 중… 로그인 후 자동으로 돌아옵니다.";
             try
             {
                 var result = await Task.Run(delegate { return AccountDiscovery.Read(profile, email, delegate(string text)
@@ -117,16 +121,8 @@ namespace TeamCalendar
                 draft.UseAccountCatalog(result); ConnectionChanged = true; connect.Text = "Google 계정 연결"; connect.AccessibleName = connect.Text; UpdateMode(); ReloadSources();
                 message.Text = result.warnings.Count == 0 ? "표시할 캘린더에 체크한 뒤 ‘" + apply.Text + "’ 버튼을 누르세요." : "일부 특수 캘린더를 제외했습니다. 표시할 캘린더를 선택하세요.";
             }
-            catch (GoogleLoginRequired)
-            {
-                if (IsDisposed || request != generation) return;
-                connection.Text = "전용 Google 창에서 로그인한 뒤 창을 닫고 같은 연결 버튼을 다시 눌러주세요.";
-                connect.Text = "로그인 완료 · 연결"; connect.AccessibleName = connect.Text;
-                needsLogin = true;
-            }
             catch (Exception error) { if (!IsDisposed && request == generation) connection.Text = error.Message; }
             finally { if (!IsDisposed) { connecting = false; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = true; } }
-            if (needsLogin && !IsDisposed) OpenLogin();
         }
         void OpenAdvanced()
         {
