@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 if ($EnableAutoStart -and $DisableAutoStart) { throw '자동 실행 켜기와 끄기는 동시에 지정할 수 없습니다.' }
 $widgetInstall = Join-Path $env:LOCALAPPDATA 'Programs\GoogleCalendarWidget'
 $widgetPreviouslyInstalled = @(Get-ChildItem -LiteralPath $widgetInstall -Filter 'GoogleCalendarWidget*.exe' -File -ErrorAction SilentlyContinue).Count -gt 0
-$widgetExeName = 'GoogleCalendarWidget-v5.8.1.exe'
+$widgetExeName = 'GoogleCalendarWidget-v5.8.2.exe'
 $widgetSource = Join-Path $PSScriptRoot 'bin\GoogleCalendarWidget.exe'
 if (-not (Test-Path -LiteralPath $widgetSource)) { $widgetSource = Join-Path $PSScriptRoot $widgetExeName }
 if (-not (Test-Path -LiteralPath $widgetSource)) { throw '실행 파일을 찾을 수 없습니다. 소스 배포본에서는 build.ps1을 먼저 실행하세요.' }

@@ -13,6 +13,13 @@ if ($oldProcess -and -not $oldProcess.WaitForExit(30000)) { exit 1 }
 $savedStartup = @{}
 $shortcutBackup = $null
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+function Start-WidgetExecutable([string]$Executable) {
+    $launch = New-Object System.Diagnostics.ProcessStartInfo
+    $launch.FileName = $Executable
+    $launch.WorkingDirectory = $installDirectory
+    $launch.UseShellExecute = $false
+    [System.Diagnostics.Process]::Start($launch) | Out-Null
+}
 try {
     $runValues = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
     foreach ($property in $runValues.PSObject.Properties) {
@@ -33,11 +40,11 @@ try {
             $shortcut.Save()
         }
     }
-    Start-Process -FilePath $updatedExe -WorkingDirectory $installDirectory
+    Start-WidgetExecutable $updatedExe
 } catch {
     foreach ($entry in $savedStartup.GetEnumerator()) { try { Set-ItemProperty -LiteralPath $runKey -Name $entry.Key -Value $entry.Value } catch {} }
     if ($shortcutBackup) { try { Copy-Item -LiteralPath $shortcutBackup -Destination $shortcutPath -Force } catch {} }
-    Start-Process -FilePath $previousExe -WorkingDirectory $installDirectory
+    Start-WidgetExecutable $previousExe
     Add-Type -AssemblyName System.Windows.Forms
     [Windows.Forms.MessageBox]::Show('업데이트를 마치지 못해 이전 버전으로 돌아왔습니다. 다시 시도해 주세요.', '캘린더 업데이트') | Out-Null
     exit 1
