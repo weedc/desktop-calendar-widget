@@ -152,5 +152,59 @@ class NativeMacTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
         self.assertEqual(probe(),'false')
 
+    def test_c_real_hidden_window_reuses_without_visibility_or_recreation(self):
+        import os,time,threading
+        from urllib.parse import urlencode
+        if os.environ.get('CALENDAR_WIDGET_NATIVE_CHROME_TEST')!='1': self.skipTest('native Chrome window test is opt-in')
+        state=subprocess.run(['/usr/bin/osascript','-e','application "Google Chrome" is running'],capture_output=True,text=True,check=True).stdout.strip()
+        if state!='false': self.skipTest('preserve an existing Chrome session')
+        import Quartz
+        browser=GoogleBrowser(); stop=threading.Event(); exposed=[]; sampler=None
+        with tempfile.TemporaryDirectory(prefix='calendar-native-chrome-') as folder:
+            process=subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','--no-first-run','--no-default-browser-check','--disable-background-mode','--user-data-dir='+folder,'about:blank'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            def onscreen():
+                return {w[Quartz.kCGWindowNumber] for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly,Quartz.kCGNullWindowID) if w.get(Quartz.kCGWindowOwnerPID)==process.pid and w.get(Quartz.kCGWindowLayer)==0}
+            def url(month):
+                return 'https://calendar.google.com/calendar/embed?'+urlencode(dict(src='en.usa#holiday@group.v.calendar.google.com',hl='ko',dates=month+'01/'+month+'28',widget_reader=browser.tag))
+            try:
+                try:
+                    browser.navigate(url('202611'))
+                    for _ in range(100):
+                        try:
+                            browser.apple(browser.scope()+'return id of w\nend tell'); break
+                        except RuntimeError: time.sleep(.1)
+                    browser.hide()
+                except RuntimeError as error:
+                    if '자동화' in str(error): self.skipTest('runner has not granted Chrome Automation; no permission was changed')
+                    raise
+                owned=browser.window_id
+                count=browser.apple('tell application "Google Chrome" to return count of windows')
+                baseline=onscreen()
+                def sample():
+                    while not stop.is_set():
+                        if onscreen()-baseline: exposed.append(True)
+                        time.sleep(.01)
+                sampler=threading.Thread(target=sample,daemon=True); sampler.start()
+                for month in ('202611','202612','202611'):
+                    browser.navigate(url(month)); time.sleep(.5)
+                    self.assertEqual(browser.window_id,owned)
+                    self.assertEqual(browser.apple(browser.scope()+'return visible of w\nend tell'),'false')
+                    self.assertEqual(browser.apple('tell application "Google Chrome" to return count of windows'),count)
+                stop.set();sampler.join();sampler=None
+                self.assertFalse(exposed,'a hidden Chrome reader became visible during navigation')
+                browser.apple(browser.scope()+'close w\nend tell')
+                remaining=browser.apple('tell application "Google Chrome" to return count of windows')
+                for _ in range(3):
+                    with self.assertRaises(RuntimeError): browser.navigate(url('202611'))
+                self.assertEqual(browser.apple('tell application "Google Chrome" to return count of windows'),remaining)
+            finally:
+                stop.set()
+                if sampler: sampler.join(timeout=3)
+                browser.close()
+                if process.poll() is None:
+                    process.terminate()
+                    try: process.wait(timeout=5)
+                    except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
+
 
 if __name__=='__main__': unittest.main()
