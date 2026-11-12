@@ -12,5 +12,5 @@ except (ValueError, UnicodeError):
     raise SystemExit("The native self-check did not return valid JSON")
 if result.returncode or "error" in data:
     raise SystemExit(data.get("error", "Native self-check failed"))
-assert data["passed"] == 66, data
+assert data["passed"] == 73, data
 print(json.dumps(data, ensure_ascii=True, indent=2))

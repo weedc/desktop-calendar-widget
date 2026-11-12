@@ -10,6 +10,11 @@ from pathlib import Path
 def main():
     for stream in (sys.stdin,sys.stdout,sys.stderr):
         if stream is not None and hasattr(stream,'reconfigure'): stream.reconfigure(encoding='utf-8')
+    if '--google-background' in sys.argv:
+        from google_browser import background_main
+        index = sys.argv.index('--google-background')
+        if len(sys.argv) != index+3: raise SystemExit('Invalid background entry')
+        raise SystemExit(background_main(sys.argv[index+1],sys.argv[index+2]))
     from bridge import mcp,send
     if '--mcp' in sys.argv: mcp(); return
     if '--command' in sys.argv:
@@ -85,6 +90,9 @@ def main():
                 if channel.fileno()<0: return
     threading.Thread(target=serve,daemon=True).start()
     app.exec()
+    window.google_reader.cancel()
+    window.pool.waitForDone()
+    window.google_reader.close()
     channel.close(); path.unlink(missing_ok=True)
 
 

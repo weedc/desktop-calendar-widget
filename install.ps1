@@ -1,6 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 $widgetInstall = Join-Path $env:LOCALAPPDATA 'Programs\GoogleCalendarWidget'
-$widgetExeName = 'GoogleCalendarWidget-v5.4.1.exe'
+$widgetExeName = 'GoogleCalendarWidget-v5.6.1.exe'
 $widgetSource = Join-Path $PSScriptRoot 'bin\GoogleCalendarWidget.exe'
 if (-not (Test-Path -LiteralPath $widgetSource)) { $widgetSource = Join-Path $PSScriptRoot $widgetExeName }
 if (-not (Test-Path -LiteralPath $widgetSource)) { throw '실행 파일을 찾을 수 없습니다. 소스 배포본에서는 build.ps1을 먼저 실행하세요.' }

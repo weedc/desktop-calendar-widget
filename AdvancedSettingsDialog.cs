@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -19,7 +19,7 @@ namespace TeamCalendar
     sealed class CalendarAdvancedSettings : ThemeWindow
     {
         readonly CalendarSettingsDraft parent, draft;
-        readonly ComboBox profiles, calendar, fontSize;
+        readonly ComboBox calendar, fontSize;
         readonly TextBox email, nickname, summaryTime;
         readonly ColorPalette palette;
         readonly CheckBox reminder, allDay, autoSync, compact, summary, desktop, startup;
@@ -27,6 +27,7 @@ namespace TeamCalendar
         readonly Label message;
         CalendarSource selected;
         bool loading;
+        public bool ConnectionOpened { get; private set; }
         sealed class SourceItem
         {
             public CalendarSource Source;
@@ -36,15 +37,18 @@ namespace TeamCalendar
         {
             parent = pending; draft = new CalendarSettingsDraft(parent.Work, parent.Appearance, parent.Appearance.Desktop, parent.Startup, parent.Profiles) { OpenCodex = parent.OpenCodex };
             StartPosition = FormStartPosition.CenterParent;
-            Caption("연결 계정", 22, 76, 315); Caption("계정 이메일 (선택)", 350, 76, 318);
-            profiles = new SettingsChoice { Left = 22, Top = 105, Width = 310, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Design.Panel, ForeColor = Design.Text, AccessibleName = "Chrome 프로필" };
-            profiles.Items.Add(new FeatureState.Profile { directory = "", name = "기본 Chrome 계정", email = "" });
-            foreach (var profile in draft.Profiles) profiles.Items.Add(profile); Controls.Add(profiles);
-            if (draft.Work.ActiveProfile() != "" && !profiles.Items.Cast<FeatureState.Profile>().Any(p => p.directory == draft.Work.ActiveProfile())) profiles.Items.Add(new FeatureState.Profile { directory = draft.Work.ActiveProfile(), name = "현재 연결 계정", email = draft.Work.ActiveUser() });
+            Caption("전용 Google 연결", 22, 76, 315); Caption("계정 이메일 (선택)", 350, 76, 318);
+            var login = Action("Google 로그인 열기", 22, 103, 310, async delegate
+            {
+                string loginEmail = email.Text.Trim(); message.Text = "전용 로그인 창을 여는 중…";
+                try
+                {
+                    await System.Threading.Tasks.Task.Run(delegate { AccountDiscovery.OpenLogin("", loginEmail); });
+                    if (!IsDisposed) { ConnectionOpened = true; message.Text = "로그인을 마치고 전용 Chrome 창을 닫은 뒤 돌아가 적용해 주세요."; }
+                }
+                catch (Exception error) { if (!IsDisposed) message.Text = error.Message; }
+            });
             email = Field("구글 계정 이메일", 350, 103, 318); email.Text = draft.Work.ActiveUser();
-            profiles.SelectedIndex = 0;
-            for (int i = 0; i < profiles.Items.Count; i++) if (((FeatureState.Profile)profiles.Items[i]).directory == draft.Work.ActiveProfile()) profiles.SelectedIndex = i;
-            profiles.SelectedIndexChanged += delegate { var profile = (FeatureState.Profile)profiles.SelectedItem; if (profile != null) email.Text = profile.email; };
             Caption("캘린더 관리", 22, 158, 310); Caption("표시 이름", 350, 158, 318);
             calendar = new SettingsChoice { Left = 22, Top = 187, Width = 310, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Design.Panel, ForeColor = Design.Text, AccessibleName = "관리할 캘린더" }; Controls.Add(calendar);
             nickname = Field("캘린더 표시 이름", 350, 185, 318);
@@ -99,9 +103,8 @@ namespace TeamCalendar
         {
             if (!DailySummaryPolicy.ValidTime(summaryTime.Text.Trim())) { message.Text = "요약 시각은 00:00~23:59 사이의 HH:mm으로 입력해 주세요."; summaryTime.Focus(); return false; }
             SaveSource();
-            var profile = (FeatureState.Profile)profiles.SelectedItem;
-            if (draft.Work.connectionMode == "account") { draft.Work.accountProfile = profile.directory; draft.Work.accountEmail = email.Text.Trim(); }
-            else { draft.Work.chromeProfile = profile.directory; draft.Work.googleUser = email.Text.Trim(); }
+            if (draft.Work.connectionMode == "account") draft.Work.accountEmail = email.Text.Trim();
+            else draft.Work.googleUser = email.Text.Trim();
             draft.Work.remindersEnabled = reminder.Checked; draft.Work.allDayReminders = allDay.Checked;
             draft.Work.autoSyncEnabled = autoSync.Checked; draft.Work.compactEmojis = compact.Checked;
             draft.Work.dailySummaryEnabled = summary.Checked; draft.Work.SetDailySummaryTime(summaryTime.Text.Trim());

@@ -12,6 +12,7 @@ namespace TeamCalendar
             var checks = new List<string>(); string path = Path.Combine(Path.GetTempPath(), "calendar-widget-qa-" + Guid.NewGuid().ToString("N") + ".json");
             try
             {
+                HeadlessChecks.Run(checks);
                 var fresh = FeatureState.Load(path);
                 Require(!fresh.setupCompleted, "fresh install requests setup", checks);
                 fresh.setupCompleted = true;

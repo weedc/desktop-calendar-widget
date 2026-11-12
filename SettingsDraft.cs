@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -17,7 +17,7 @@ namespace TeamCalendar
             Work = App.Json.Deserialize<FeatureState>(App.Json.Serialize(state));
             Appearance = App.Json.Deserialize<Settings>(App.Json.Serialize(appearance));
             Appearance.Desktop = desktop; Startup = startup;
-            Profiles = (profiles ?? FeatureState.Profiles()).ToList();
+            Profiles = (profiles ?? Enumerable.Empty<FeatureState.Profile>()).ToList();
         }
         static List<CalendarSource> CopySources(List<CalendarSource> values) { return values.Select(c => new CalendarSource { id = c.id, name = c.name, color = c.color, enabled = c.enabled }).ToList(); }
         static void CopyOptions(FeatureState from, FeatureState to)

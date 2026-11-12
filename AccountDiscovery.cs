@@ -1,13 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows;
-using System.Windows.Automation;
 
 namespace TeamCalendar
 {
@@ -40,117 +37,53 @@ namespace TeamCalendar
         {
             return "https://calendar.google.com/calendar/u/0/r/settings?hl=ko" + (string.IsNullOrWhiteSpace(email) ? "" : "&authuser=" + Uri.EscapeDataString(email)) + (tag == null ? "" : "&widget_account=" + tag);
         }
-        public static void OpenLogin(string profile, string email)
-        {
-            string args = (profile == "" ? "" : "--profile-directory=\"" + profile.Replace("\"", "") + "\" ") + "--app=\"" + SettingsUrl(email) + "\" --window-size=1100,900";
-            Process.Start(new ProcessStartInfo(App.Chrome(), args) { UseShellExecute = true });
-        }
+        public static string LoginUrl(string email) { return "https://accounts.google.com/ServiceLogin?hl=ko&service=cl&continue=" + Uri.EscapeDataString(SettingsUrl(email)); }
+        public static void OpenLogin(string profile, string email) { GoogleBrowser.Shared.OpenLogin(email); }
         public static AccountCatalog Read(string profile, string email, Action<string> progress)
         {
-            lock (gate) { if (busy) throw new InvalidOperationException("이미 계정의 캘린더를 불러오는 중입니다."); busy = true; message = "로그인된 Google 계정 확인 중…"; error = ""; last = null; }
-            IntPtr window = IntPtr.Zero;
+            lock (gate) { if (busy) throw new InvalidOperationException("이미 계정의 캘린더를 불러오는 중입니다."); busy = true; message = "전용 Google 연결 확인 중…"; error = ""; last = null; }
             try
             {
-                if (profile.Contains("\"") || profile.Contains("\r") || profile.Contains("\n")) throw new ArgumentException("올바른 Chrome 프로필을 선택해 주세요.");
-                string tag = Guid.NewGuid().ToString("N"), url = SettingsUrl(email, tag);
-                var existing = new HashSet<IntPtr>(Win.ChromeWindows());
-                string args = (profile == "" ? "" : "--profile-directory=\"" + profile + "\" ") + "--app=\"" + url + "\" --window-position=-16000,0 --window-size=1400,1600";
-                Process.Start(new ProcessStartInfo(App.Chrome(), args) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
-                var watch = Stopwatch.StartNew();
-                while (window == IntPtr.Zero && watch.Elapsed.TotalSeconds < 30)
+                var browser = GoogleBrowser.Shared;
+                lock (browser.Gate)
                 {
-                    foreach (var candidate in Win.ChromeWindows())
+                    browser.Navigate(SettingsUrl(email, Guid.NewGuid().ToString("N")));
+                    Dictionary<string, object> catalog = null; object[] rows = new object[0]; var watch = Stopwatch.StartNew();
+                    while (watch.ElapsedMilliseconds < 30000)
                     {
-                        if (existing.Contains(candidate)) continue;
-                        string address = Address(candidate);
-                        if (!address.Contains("widget_account=" + tag)) continue;
-                        if (!address.Contains("calendar.google.com/") && !address.Contains("accounts.google.com/")) continue;
-                        window = candidate; break;
+                        catalog = browser.Script("catalog", null) as Dictionary<string, object>;
+                        if (catalog != null && catalog.ContainsKey("rows")) rows = GoogleDom.Array(catalog["rows"]);
+                        if (rows.Length > 0 && App.Str(catalog, "email") != "") break;
+                        Thread.Sleep(350);
                     }
-                    if (window == IntPtr.Zero) Thread.Sleep(150);
-                }
-                if (window == IntPtr.Zero) throw new InvalidOperationException("Google 계정 화면을 찾지 못했습니다. Google 계정 열기로 로그인한 뒤 다시 시도해 주세요.");
-                long ex = Win.GetWindowLongPtr(window, -20).ToInt64(), style = Win.GetWindowLongPtr(window, -16).ToInt64();
-                Win.SetWindowLongPtr(window, -20, new IntPtr((ex & ~0x40000L) | 0x80L));
-                Win.SetWindowLongPtr(window, -16, new IntPtr((style & ~0x80C40000L) | 0x40000000L | 0x10000000L));
-                Win.SetParent(window, Win.DesktopHost()); Win.SetWindowPos(window, new IntPtr(1), -16000, 0, 1400, 1600, 0x0010 | 0x0040 | 0x0020);
-                var result = new AccountCatalog { profile = profile };
-                AutomationElement root = null; List<string> groups = null;
-                watch.Restart();
-                while (watch.Elapsed.TotalSeconds < 30)
-                {
-                    root = AutomationElement.FromHandle(window);
-                    var all = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tree));
-                    groups = all.Cast<AutomationElement>().Select(e => e.Current.Name).Where(IsCalendarGroup).Distinct().ToList();
-                    if (groups.Count > 0) break;
-                    Thread.Sleep(250);
-                }
-                if (groups == null || groups.Count == 0) throw new InvalidOperationException("이 Chrome 계정의 캘린더를 읽지 못했습니다. Google 계정 열기에서 로그인 상태를 확인해 주세요.");
-                foreach (AutomationElement button in root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
-                {
-                    string name = button.Current.Name ?? "";
-                    if (!name.Contains("Google 계정") && !name.Contains("Google Account")) continue;
-                    var found = Regex.Match(name, @"([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})");
-                    if (found.Success) { result.email = found.Groups[1].Value; break; }
-                }
-                if (result.email == "") throw new InvalidOperationException("연결된 Google 계정을 확인하지 못했습니다. Google 계정 화면을 확인해 주세요.");
-                if (email != "" && !string.Equals(email, result.email, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("요청한 계정과 실제 로그인 계정이 다릅니다. Google 계정 열기에서 계정을 선택해 주세요.");
-                foreach (string group in groups)
-                {
-                    root = AutomationElement.FromHandle(window); var tree = CalendarTree(root, group);
-                    int count = Math.Min(250, tree.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem)).Count);
-                    for (int index = 0; index < count; index++)
+                    if (catalog == null || rows.Length == 0 || App.Str(catalog, "email") == "") throw new InvalidOperationException("캘린더 목록을 읽지 못했습니다. ‘Google 로그인 열기’에서 계정과 접근 권한을 확인해 주세요.");
+                    var result = new AccountCatalog { profile = profile, email = App.Str(catalog, "email") };
+                    if (email != "" && !string.Equals(email, result.email, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("요청한 계정과 로그인한 계정이 다릅니다. Google 로그인에서 사용할 계정을 선택해 주세요.");
+                    foreach (Dictionary<string, object> row in rows.Take(250))
                     {
-                        root = AutomationElement.FromHandle(window); tree = CalendarTree(root, group);
-                        var rows = tree.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem));
-                        if (index >= rows.Count) break;
-                        var item = rows[index]; string name = item.Current.Name;
+                        string name = App.Str(row, "label");
                         lock (gate) message = "캘린더 확인 중 · " + name;
                         if (progress != null) progress(message);
-                        string previous = Address(window); SelectCalendar(item);
-                        bool clicked = false;
+                        string before = Convert.ToString(browser.Script("route", null));
+                        if (!Convert.ToBoolean(browser.Script("select", row))) { result.warnings.Add(name); continue; }
                         string id = ""; watch.Restart();
-                        while (watch.Elapsed.TotalSeconds < 5)
+                        while (watch.ElapsedMilliseconds < 4000)
                         {
-                            string address = Address(window);
-                            if (address != previous) { id = DecodeCalendar(address); if (id != "" || address.Contains("/settings/birthdays")) break; }
-                            if (!clicked && watch.ElapsedMilliseconds > 600)
-                            {
-                                object scroll; if (item.TryGetCurrentPattern(ScrollItemPattern.Pattern, out scroll)) try { ((ScrollItemPattern)scroll).ScrollIntoView(); } catch { }
-                                var bounds = item.Current.BoundingRectangle;
-                                if (!bounds.IsEmpty) Win.ClickChrome(window, (int)(bounds.Left + Math.Min(bounds.Width / 2, 90)), (int)(bounds.Top + bounds.Height / 2));
-                                clicked = true;
-                            }
-                            Thread.Sleep(100);
+                            string route = Convert.ToString(browser.Script("route", null));
+                            if (route != before) { id = DecodeCalendar(route); if (id != "" || route.Contains("/settings/birthdays")) break; }
+                            Thread.Sleep(150);
                         }
                         if (id == "") { result.warnings.Add(name + " · 표시용 캘린더를 확인할 수 없습니다."); continue; }
                         if (!result.calendars.Any(c => c.id == id)) result.calendars.Add(new CalendarSource { id = id, name = name, color = Design.Colors[result.calendars.Count % Design.Colors.Length] });
                     }
+                    if (result.calendars.Count == 0) throw new InvalidOperationException("선택 가능한 캘린더를 찾지 못했습니다. ID 입력 방식을 사용할 수도 있습니다.");
+                    browser.MarkVerified();
+                    lock (gate) { last = result; message = result.calendars.Count + "개 캘린더를 찾았습니다."; }
+                    return result;
                 }
-                if (result.calendars.Count == 0) throw new InvalidOperationException("선택 가능한 캘린더를 찾지 못했습니다. ID 입력 방식을 사용할 수도 있습니다.");
-                lock (gate) { last = result; message = result.calendars.Count + "개 캘린더를 찾았습니다."; }
-                return result;
             }
             catch (Exception e) { lock (gate) error = e.Message; throw; }
-            finally { if (window != IntPtr.Zero && Win.IsWindow(window)) Win.PostMessage(window, 0x10, IntPtr.Zero, IntPtr.Zero); lock (gate) busy = false; }
-        }
-        static bool IsCalendarGroup(string name) { return name == "내 캘린더의 설정" || name == "다른 캘린더의 설정" || name == "Settings for my calendars" || name == "Settings for other calendars"; }
-        static AutomationElement CalendarTree(AutomationElement root, string name) { return root.FindFirst(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tree), new PropertyCondition(AutomationElement.NameProperty, name))); }
-        public static string Address(IntPtr window)
-        {
-            try
-            {
-                var root = AutomationElement.FromHandle(window);
-                var address = root.FindFirst(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit), new OrCondition(new PropertyCondition(AutomationElement.NameProperty, "주소창 및 검색창"), new PropertyCondition(AutomationElement.NameProperty, "Address and search bar"))));
-                object pattern; return address != null && address.TryGetCurrentPattern(ValuePattern.Pattern, out pattern) ? Uri.UnescapeDataString(((ValuePattern)pattern).Current.Value) : "";
-            }
-            catch { return ""; }
-        }
-        static void SelectCalendar(AutomationElement item)
-        {
-            object pattern;
-            if (item.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) { ((InvokePattern)pattern).Invoke(); return; }
-            if (item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)) { ((SelectionItemPattern)pattern).Select(); return; }
+            finally { lock (gate) busy = false; }
         }
     }
 }

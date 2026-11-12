@@ -17,5 +17,5 @@ python3 -m PyInstaller --noconfirm --clean --distpath macos/dist --workpath maco
 codesign --verify --deep --strict 'macos/dist/Team Calendar Widget.app'
 mkdir -p dist
 arch="$(uname -m)"
-ditto -c -k --sequesterRsrc --keepParent 'macos/dist/Team Calendar Widget.app' "dist/DesktopCalendarWidget-v5.5.0-mac-${arch}.zip"
-shasum -a 256 "dist/DesktopCalendarWidget-v5.5.0-mac-${arch}.zip" > "dist/SHA256SUMS-mac-${arch}.txt"
+ditto -c -k --sequesterRsrc --keepParent 'macos/dist/Team Calendar Widget.app' "dist/DesktopCalendarWidget-v5.6.1-mac-${arch}.zip"
+shasum -a 256 "dist/DesktopCalendarWidget-v5.6.1-mac-${arch}.zip" > "dist/SHA256SUMS-mac-${arch}.txt"

@@ -14,7 +14,6 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using System.Windows.Automation;
 using System.Windows.Forms;
 using System.Xml.Serialization;
 using Microsoft.Win32;
@@ -74,6 +73,7 @@ namespace TeamCalendar
                 Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log(e.Exception.ToString()); };
                 try { Application.Run(new CalendarWindow()); }
                 catch (Exception e) { Log(e.ToString()); MessageBox.Show(e.Message, "팀 캘린더 위젯"); }
+                finally { GoogleBrowser.Shared.Dispose(); }
             }
         }
         public static void Log(string message) { try { File.AppendAllText(Path.Combine(DataDir, "widget-v2.log"), DateTime.Now.ToString("s") + " " + message + Environment.NewLine); } catch { } }
@@ -110,157 +110,88 @@ namespace TeamCalendar
         public static string Str(Dictionary<string, object> d, string key, string fallback = "") { object value; return d.TryGetValue(key, out value) ? Convert.ToString(value, CultureInfo.InvariantCulture) : fallback; }
     }
 
-    // Read the official calendar's accessibility view through the existing Chrome login.
-    // No cookies, tokens, private APIs or browser-profile changes are used.
+    // One headless browser is shared across all enabled calendars. There are
+    // no Win32 reader windows to show, reparent, activate or recover.
     sealed class CalendarReader : IDisposable
     {
         public readonly CalendarSource Source;
-        public CalendarReader(CalendarSource source) { Source = source; }
-        IntPtr window;
-        string expectedTag;
+        readonly GoogleBrowser browser;
         bool disposed;
-        public IntPtr Window { get { return window; } }
-        public void EnsureBrowser()
-        {
-            if (window != IntPtr.Zero && Win.IsWindow(window)) return;
-            var existing = new HashSet<IntPtr>(Win.ChromeWindows());
-            expectedTag = DateTime.UtcNow.Ticks.ToString();
-            Process.Start(new ProcessStartInfo(App.Chrome(), App.ProfileArg + "--app=\"" + App.EmbedUrl(Source) + "&widget_refresh=" + expectedTag + "\" --window-position=-16000,0 --window-size=2000,3600") { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
-            var watch = Stopwatch.StartNew();
-            while (watch.ElapsedMilliseconds < 35000 && !disposed)
-            {
-                foreach (var candidate in Win.ChromeWindows())
-                {
-                    if (existing.Contains(candidate) || !IsSourceWindow(candidate)) continue;
-                    window = candidate;
-                    long ex = Win.GetWindowLongPtr(window, -20).ToInt64();
-                    // Materialize Chrome's accessibility document before moving it off-screen.
-                    // A one-step alpha keeps Chrome rendering during initialization without
-                    // accepting input or activation. It becomes fully invisible off-screen.
-                    Win.SetWindowLongPtr(window, -20, new IntPtr((ex & ~0x40000L) | 0x080800a0L));
-                    Win.SetLayeredWindowAttributes(window, 0, 1, 2);
-                    Win.ShowWindow(window, 4);
-                    var area = Screen.PrimaryScreen.WorkingArea;
-                    Win.SetWindowPos(window, new IntPtr(-1), area.Left, area.Top, 2000, Math.Min(1300, area.Height), 0x0010 | 0x0040 | 0x0020);
-                    bool ready = false;
-                    for (int warm = 0; warm < 120 && !disposed; warm++)
-                    { try { var root = AutomationElement.FromHandle(window); Header(root); if (root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem)) == null) throw new InvalidOperationException(); ready = true; break; } catch { Thread.Sleep(250); } }
-                    if (!ready) { Win.SetLayeredWindowAttributes(window, 0, 0, 2); Win.SetWindowPos(window, new IntPtr(1), -16000, 0, 2000, 1300, 0x0010); throw new InvalidOperationException("Google 캘린더 화면을 초기화하지 못했습니다. Chrome 로그인을 확인해 주세요."); }
-                    long style = Win.GetWindowLongPtr(window, -16).ToInt64();
-                    Win.SetWindowLongPtr(window, -16, new IntPtr((style & ~0xa1c40000L) | 0x40000000L | 0x10000000L));
-                    Win.SetParent(window, Win.DesktopHost());
-                    Win.SetWindowPos(window, new IntPtr(1), -16000, 0, 2000, 3600, 0x0010 | 0x0040 | 0x0020);
-                    Win.SetLayeredWindowAttributes(window, 0, 0, 2);
-                    App.Log("Reader connected, HWND=" + window.ToInt64()); return;
-                }
-                Thread.Sleep(200);
-            }
-            throw new InvalidOperationException("Chrome에서 팀 캘린더에 접근 가능한 계정으로 로그인해 주세요.");
-        }
-        bool IsSourceWindow(IntPtr candidate)
-        {
-            try
-            {
-                string url = AccountDiscovery.Address(candidate);
-                return url.Contains("calendar.google.com/calendar/") && url.Contains("embed?") && Regex.IsMatch(url, @"[?&]src=" + Regex.Escape(Source.id) + @"(?:&|$)") && url.Contains("widget_refresh=" + expectedTag);
-            }
-            catch { }
-            return false;
-        }
-        static AutomationElementCollection Buttons(AutomationElement root)
-        {
-            return root.FindAll(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button), new PropertyCondition(AutomationElement.IsControlElementProperty, true)));
-        }
-        static DateTime Header(AutomationElement root)
-        {
-            foreach (AutomationElement b in Buttons(root))
-            {
-                var match = Regex.Match(b.Current.Name ?? "", @"^(\d{4})년\s*(\d{1,2})월$");
-                if (match.Success) return new DateTime(int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value), 1);
-            }
-            throw new InvalidOperationException("캘린더를 읽는 중입니다. 잠시 후 다시 시도해 주세요.");
-        }
-        static void Invoke(AutomationElement root, string name)
-        {
-            foreach (AutomationElement b in Buttons(root))
-            {
-                if (b.Current.Name != name) continue;
-                object pattern;
-                if (b.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) { ((InvokePattern)pattern).Invoke(); return; }
-            }
-            throw new InvalidOperationException("월 이동 버튼을 찾지 못했습니다.");
-        }
+        public CalendarReader(CalendarSource source) : this(source, GoogleBrowser.Shared) { }
+        internal CalendarReader(CalendarSource source, GoogleBrowser connection) { Source = source; browser = connection; }
+        public IntPtr Window { get { return IntPtr.Zero; } }
         public MonthData Read(DateTime month, bool reload)
         {
-            if (reload)
+            if (disposed) throw new ObjectDisposedException("CalendarReader");
+            month = new DateTime(month.Year, month.Month, 1);
+            lock (browser.Gate)
             {
-                IntPtr previous = window;
-                if (previous != IntPtr.Zero && Win.IsWindow(previous))
+                // A fresh document is fetched for every actual read, including
+                // manual refresh. Cached-only paths never call this method.
+                browser.Navigate(App.EmbedUrl(Source) + "&dates=" + month.ToString("yyyyMMdd") + "/" + month.AddMonths(1).AddDays(-1).ToString("yyyyMMdd") + "&widget_refresh=" + Guid.NewGuid().ToString("N"));
+                Dictionary<string, object> snapshot = null; int stable = 0;
+                var watch = Stopwatch.StartNew();
+                while (watch.ElapsedMilliseconds < 35000 && !disposed)
                 {
-                    Win.PostMessage(previous, 0x0010, IntPtr.Zero, IntPtr.Zero);
-                    for (int wait = 0; wait < 30 && Win.IsWindow(previous); wait++) Thread.Sleep(100);
+                    snapshot = browser.Script("snapshot", null) as Dictionary<string, object>;
+                    object[] cells = snapshot == null || !snapshot.ContainsKey("cells") ? new object[0] : GoogleDom.Array(snapshot["cells"]);
+                    if (snapshot != null && App.Str(snapshot, "month") == month.ToString("yyyy-MM") && cells.Length >= 28 && !Convert.ToBoolean(snapshot["busy"])) { if (++stable >= 2) break; }
+                    else stable = 0;
+                    Thread.Sleep(400);
                 }
-                window = IntPtr.Zero;
+                if (stable < 2) throw new InvalidOperationException("Google 일정 표를 읽지 못했습니다. 로그인과 접근 권한을 확인해 주세요. 기존 데이터를 유지합니다.");
+                foreach (Dictionary<string, object> cell in GoogleDom.Array(snapshot["cells"]))
+                {
+                    if (!Convert.ToBoolean(cell["more"])) continue;
+                    if (!Convert.ToBoolean(browser.Script("expand", App.Str(cell, "label")))) throw new InvalidOperationException("숨겨진 일정을 펼치지 못했습니다. 기존 데이터를 유지합니다.");
+                    try
+                    {
+                        object[] expanded = new object[0]; var count = Regex.Match(App.Str(cell, "label"), @"^일정 (\d+)개,"); int expected = count.Success ? int.Parse(count.Groups[1].Value) : 1; watch.Restart();
+                        while (watch.ElapsedMilliseconds < 5000) { expanded = GoogleDom.Array(browser.Script("expanded", null)); if (expanded.Select(Convert.ToString).Distinct().Count() >= expected) break; Thread.Sleep(200); }
+                        if (expanded.Length == 0) throw new InvalidOperationException("숨겨진 일정 목록을 읽지 못했습니다. 기존 데이터를 유지합니다.");
+                        cell["events"] = GoogleDom.Array(cell["events"]).Concat(expanded).Select(Convert.ToString).Distinct().Cast<object>().ToArray();
+                    }
+                    finally { if (!Convert.ToBoolean(browser.Script("dismiss", null))) throw new InvalidOperationException("일정 펼침 창을 닫지 못했습니다. 기존 데이터를 유지합니다."); }
+                }
+                var result = Parse(snapshot, month, Source);
+                App.Log("Headless read month=" + result.month + ", day occurrences=" + result.events.Count);
+                return result;
             }
-            EnsureBrowser();
-            AutomationElement root = AutomationElement.FromHandle(window);
-            DateTime shown = DateTime.MinValue;
-            Exception last = null;
-            for (int n = 0; n < 120; n++) { try { root = AutomationElement.FromHandle(window); shown = Header(root); break; } catch (Exception e) { last = e; Thread.Sleep(250); } }
-            if (shown == DateTime.MinValue) throw last;
-            int difference = (month.Year - shown.Year) * 12 + month.Month - shown.Month;
-            if (Math.Abs(difference) > 120) throw new InvalidOperationException("한 번에 10년 이내의 달로 이동해 주세요.");
-            while (shown != month)
-            {
-                if (disposed) throw new OperationCanceledException();
-                Invoke(root, shown < month ? "다음 달" : "이전 달");
-                DateTime previous = shown;
-                for (int wait = 0; wait < 35; wait++) { Thread.Sleep(100); try { shown = Header(root); if (shown != previous) break; } catch { } }
-                if (previous == shown) throw new InvalidOperationException("구글 캘린더의 월 이동을 확인하지 못했습니다.");
-            }
-            bool ready = false;
-            for (int wait = 0; wait < 80; wait++)
-            {
-                var progress = root.FindFirst(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ProgressBar), new PropertyCondition(AutomationElement.NameProperty, "캘린더 로드 중")));
-                if (progress == null) { ready = true; break; }
-                Thread.Sleep(250);
-            }
-            if (!ready) throw new InvalidOperationException("구글 일정 로딩이 지연되고 있습니다. 잠시 후 새로고침해 주세요.");
-            Thread.Sleep(550);
+        }
+        internal static MonthData Parse(Dictionary<string, object> snapshot, DateTime month, CalendarSource source)
+        {
+            object[] cells = snapshot != null && snapshot.ContainsKey("cells") ? GoogleDom.Array(snapshot["cells"]) : null;
+            if (cells == null || cells.Length < 28 || App.Str(snapshot, "month") != month.ToString("yyyy-MM")) throw new InvalidOperationException("Google 일정 표가 아직 준비되지 않았습니다.");
             var result = new MonthData { month = month.ToString("yyyy-MM"), syncedAt = DateTimeOffset.Now.ToString("o") };
             var seen = new HashSet<string>();
-            var cells = root.FindAll(TreeScope.Descendants, new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem), new PropertyCondition(AutomationElement.IsControlElementProperty, true)));
-            foreach (AutomationElement cell in cells)
+            foreach (Dictionary<string, object> cell in cells)
             {
-                string label = cell.Current.Name ?? "";
+                string label = App.Str(cell, "label");
                 var match = Regex.Match(label, @"^일정 (?:\d+개|없음),\s*(\d{1,2})월\s*(\d{1,2})일");
-                if (!match.Success || Regex.Matches(label, "일정 ").Count != 1) continue;
+                if (!match.Success) throw new InvalidOperationException("Google 날짜 형식이 변경되었습니다. 기존 데이터를 유지합니다.");
                 int cellMonth = int.Parse(match.Groups[1].Value), day = int.Parse(match.Groups[2].Value), year = month.Year;
                 if (cellMonth - month.Month > 6) year--; if (month.Month - cellMonth > 6) year++;
                 string date = new DateTime(year, cellMonth, day).ToString("yyyy-MM-dd");
-                foreach (AutomationElement button in Buttons(cell))
+                var rawEvents = GoogleDom.Array(cell["events"]).Select(Convert.ToString).Distinct().ToArray();
+                var count = Regex.Match(label, @"^일정 (\d+)개,");
+                if (count.Success && int.Parse(count.Groups[1].Value) > rawEvents.Length) throw new InvalidOperationException("숨겨진 일정을 모두 읽지 못했습니다. 기존 데이터를 유지합니다.");
+                foreach (string raw in rawEvents)
                 {
-                    string raw = button.Current.Name ?? "";
                     int marker = raw.IndexOf(", 캘린더: ", StringComparison.Ordinal), comma = raw.IndexOf(", ", StringComparison.Ordinal);
-                    if (marker < 0 || comma < 0 || !seen.Add(date + "|" + raw)) continue;
+                    if (marker < 0 || comma < 0 || marker <= comma || !seen.Add(date + "|" + raw)) continue;
                     string time = raw.Substring(0, comma), title = raw.Substring(comma + 2, marker - comma - 2);
                     var locationMatch = Regex.Match(raw.Substring(marker), @", 위치: (.*), \d{4}년");
-                    string location = locationMatch.Success ? locationMatch.Groups[1].Value : "";
                     using (var hash = System.Security.Cryptography.SHA256.Create())
                     {
-                        string uid = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Source.id + "|" + raw))).Replace("-", "").Substring(0, 20);
-                        bool allDay = time.StartsWith("종일");
-                        string startDate = date;
+                        string uid = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(source.id + "|" + raw))).Replace("-", "").Substring(0, 20);
+                        bool allDay = time.StartsWith("종일"); string startDate = date;
                         var startMatch = Regex.Match(raw.Substring(marker), @"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일");
                         if (startMatch.Success) startDate = new DateTime(int.Parse(startMatch.Groups[1].Value), int.Parse(startMatch.Groups[2].Value), int.Parse(startMatch.Groups[3].Value)).ToString("yyyy-MM-dd");
-                        result.events.Add(new CalendarEvent { id = uid + "-" + date, uid = uid, date = date, title = title, time = time, location = location, raw = raw, sort = SortTime(time), calendarId = Source.id, calendarName = Source.name, color = Source.color, allDay = allDay, start = Design.Start(startDate, time, allDay) });
+                        result.events.Add(new CalendarEvent { id = uid + "-" + date, uid = uid, date = date, title = title, time = time, location = locationMatch.Success ? locationMatch.Groups[1].Value : "", raw = raw, sort = SortTime(time), calendarId = source.id, calendarName = source.name, color = source.color, allDay = allDay, start = Design.Start(startDate, time, allDay) });
                     }
                 }
             }
-            if (cells.Count == 0) throw new InvalidOperationException("일정 표를 읽지 못했습니다. Chrome 로그인을 확인해 주세요.");
-            result.events = result.events.OrderBy(e => e.date).ThenBy(e => e.sort).ThenBy(e => e.title).ToList();
-            App.Log("Synced month=" + result.month + ", day occurrences=" + result.events.Count);
-            return result;
+            result.events = result.events.OrderBy(e => e.date).ThenBy(e => e.sort).ThenBy(e => e.title).ToList(); return result;
         }
         static int SortTime(string time)
         {
@@ -270,7 +201,7 @@ namespace TeamCalendar
             int hour = int.Parse(match.Groups[2].Value) % 12 + (match.Groups[1].Value == "오후" ? 12 : 0);
             return hour * 60 + (match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : 0);
         }
-        public void Dispose() { disposed = true; if (window != IntPtr.Zero && Win.IsWindow(window)) Win.PostMessage(window, 0x10, IntPtr.Zero, IntPtr.Zero); }
+        public void Dispose() { disposed = true; }
     }
 
     sealed class EventHit { public Rectangle bounds; public CalendarEvent item; public DateTime day; }

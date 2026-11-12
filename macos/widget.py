@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QDialog, QVBoxLayout, QHBo
 from core import (Store, VERSION, PALETTE, now, days_for_month, context_key, source_key,
                   month_valid, day_valid, time_valid)
 from google_reader import GoogleReader
+from google_browser import LoginRequired
 import platform_mac
 
 STYLE = '''
@@ -103,7 +104,7 @@ class Advanced(QDialog):
         form.addRow('불투명도', self.opacity)
         self.font_size = QSpinBox(); self.font_size.setRange(8,20); self.font_size.setValue(draft['font_size'])
         form.addRow('글자 크기', self.font_size)
-        notice = QLabel('변경은 돌아간 뒤 마지막 “적용 / 시작하기”를 눌러야 반영됩니다.\nChrome → 보기 → 개발자 → Apple Events의 JavaScript 허용이 필요합니다.')
+        notice = QLabel('변경은 돌아간 뒤 마지막 “적용 / 시작하기”를 눌러야 반영됩니다.\nGoogle 로그인은 전용 Chrome 창에서 한 번 진행합니다. 동기화는 창 없이 실행됩니다.')
         notice.setWordWrap(True); form.addRow(notice)
         self.codex = QCheckBox('적용 후 Codex · Dot 설정 열기'); form.addRow(self.codex)
         main=getattr(owner,'owner',owner)
@@ -147,6 +148,8 @@ class Settings(QDialog):
         (self.account if self.draft['mode']=='account' else self.direct).setChecked(True)
         self.connect_button = QPushButton('Google 계정 연결'); self.connect_button.clicked.connect(self.connect_account)
         layout.addWidget(self.connect_button)
+        self.login_button = QPushButton('Google 로그인 열기'); self.login_button.clicked.connect(self.open_login)
+        layout.addWidget(self.login_button)
         self.id_row = QWidget(); id_layout = QHBoxLayout(self.id_row); id_layout.setContentsMargins(0,0,0,0)
         self.id_edit = QLineEdit(); self.id_edit.setPlaceholderText('Google 캘린더 ID')
         id_layout.addWidget(self.id_edit); button('추가', self.add_id, id_layout); layout.addWidget(self.id_row)
@@ -190,22 +193,45 @@ class Settings(QDialog):
         self.draft['id_calendars'].append(dict(id=sid,name=sid.split('@')[0][:32],color=PALETTE[len(self.draft['id_calendars'])%6],enabled=True))
         self.id_edit.clear(); self.populate()
 
+    def connection_busy(self, busy):
+        self.busy = busy
+        for control in (self.connect_button,self.login_button,self.apply_button,self.account,self.direct): control.setEnabled(not busy)
+
+    def open_login(self):
+        if self.busy: return
+        if self.owner.busy:
+            self.status.setText('현재 동기화를 마친 뒤 다시 연결해 주세요.'); return
+        self.connection_busy(True)
+        email = self.draft['account_email']
+        def done(_):
+            self.connection_busy(False)
+            self.status.setText('전용 Chrome에서 로그인한 뒤 창을 닫아 주세요. 계정 방식은 연결 버튼을, ID 방식은 적용을 누르세요.')
+            self.connect_button.setText('로그인 완료 · 연결')
+        def error(message): self.connection_busy(False); self.status.setText(message)
+        self.owner.pool.start(Job(lambda:self.owner.google_reader.open_login(email),done,error))
+
     def connect_account(self):
         if self.busy: return
         if self.owner.busy:
             self.status.setText('현재 동기화를 마친 뒤 다시 연결해 주세요.'); return
-        self.capture(); self.busy = True; self.connect_button.setEnabled(False); self.apply_button.setEnabled(False)
-        self.status.setText('Chrome에서 Google 계정의 캘린더 목록을 읽는 중…')
-        def done(sources):
-            if not self.isVisible(): return
+        self.capture(); self.connection_busy(True)
+        self.status.setText('전용 Google 연결에서 캘린더를 확인하는 중…')
+        email = self.draft['account_email']
+        def connect():
+            try: return self.owner.google_reader.discover(email)
+            except LoginRequired:
+                self.owner.google_reader.open_login(email); return None
+        def done(catalog):
+            self.connection_busy(False)
+            if not catalog:
+                self.connect_button.setText('로그인 완료 · 연결')
+                self.status.setText('전용 Chrome에서 로그인한 뒤 창을 닫고 연결 버튼을 다시 누르세요.'); return
             old = {s['id']:s for s in self.draft['account_calendars']}
-            self.draft['account_calendars'] = [{**s, **old.get(s['id'],{})} for s in sources]
-            self.busy = False; self.connect_button.setEnabled(True); self.apply_button.setEnabled(True)
+            self.draft['account_calendars'] = [{**s, 'enabled':False, **old.get(s['id'],{})} for s in catalog['calendars']]
+            self.draft['account_email'] = catalog['email']; self.connect_button.setText('Google 계정 연결')
             self.populate(); self.status.setText('캘린더를 선택하고 시작하기 / 적용을 눌러 주세요.')
-        def error(message):
-            if not self.isVisible(): return
-            self.busy = False; self.connect_button.setEnabled(True); self.apply_button.setEnabled(True); self.status.setText(message)
-        self.owner.pool.start(Job(lambda: GoogleReader().discover(self.draft['account_email']), done, error))
+        def error(message): self.connection_busy(False); self.status.setText(message)
+        self.owner.pool.start(Job(connect, done, error))
 
     def advanced(self):
         if self.busy: return
@@ -358,6 +384,7 @@ class CalendarWindow(QWidget):
         self.setMinimumSize(700,410); self.setMouseTracking(True)
         self.setGeometry(*store.data['geometry']); self.pool = QThreadPool(self); self.pool.setMaxThreadCount(1)
         self.busy = False; self.pending = []; self.last_attempt = 0.0; self.month_attempts={}; self.status = '저장된 일정'; self.hits = []
+        self.google_reader = GoogleReader()
         self.detail = DayDetails(self); self.settings_window = None; self.grip = QSizeGrip(self)
         self.grip.setStyleSheet('background:transparent;')
         self.header = QWidget(self); self.header.setStyleSheet('background:transparent;')
@@ -449,7 +476,7 @@ class CalendarWindow(QWidget):
         def failed(message):
             self.busy=False; self.status=message; self.update()
             if self.pending: self.request_month(*self.pending.pop(0))
-        self.pool.start(Job(lambda: GoogleReader().read_month(month,sources,email),finished,failed))
+        self.pool.start(Job(lambda: self.google_reader.read_month(month,sources,email),finished,failed))
 
     def tick(self):
         if self.demo: return

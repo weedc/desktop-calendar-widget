@@ -13,7 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 SEOUL = ZoneInfo('Asia/Seoul')
-VERSION = '5.5.0'
+VERSION = '5.6.1'
 PALETTE = ['#548b9b', '#607eb5', '#a073b0', '#b76c86', '#b58b48', '#6d9769']
 OPTIONS = {'mode': 'account', 'account_email': '', 'id_calendars': [], 'account_calendars': [],
            'auto_sync': True, 'compact_emojis': True, 'opacity': 84, 'font_size': 11,

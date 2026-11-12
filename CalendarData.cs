@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -7,7 +7,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Windows.Automation;
 
 namespace TeamCalendar
 {
@@ -80,24 +79,6 @@ namespace TeamCalendar
             if (File.Exists(filePath)) File.Replace(filePath + ".tmp", filePath, filePath + ".previous"); else File.Move(filePath + ".tmp", filePath);
         }
         public sealed class Profile { public string directory, name, email; public override string ToString() { return name + (email == "" ? "" : " · " + email); } }
-        public static List<Profile> Profiles()
-        {
-            var list = new List<Profile>();
-            try
-            {
-                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Google\\Chrome\\User Data\\Local State");
-                var json = App.Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
-                var profile = (Dictionary<string, object>)json["profile"];
-                var info = (Dictionary<string, object>)profile["info_cache"];
-                foreach (var entry in info)
-                {
-                    var value = (Dictionary<string, object>)entry.Value;
-                    list.Add(new Profile { directory = entry.Key, name = App.Str(value, "name", entry.Key), email = App.Str(value, "user_name") });
-                }
-            }
-            catch { }
-            return list;
-        }
     }
     sealed class MultiCalendarReader : IDisposable
     {

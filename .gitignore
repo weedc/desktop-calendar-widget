@@ -29,3 +29,10 @@ widget-preview.*
 macos/build/
 macos/dist/
 .DS_Store
+
+# App-owned authenticated Chrome profiles must never be published.
+google-profile/
+DevToolsActivePort
+widget-login-started
+widget-headless-owner.json
+widget-connection-verified
