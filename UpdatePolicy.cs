@@ -47,7 +47,7 @@ namespace TeamCalendar
             }
             return best;
         }
-        public static bool Due(bool enabled, DateTime attempted, DateTime utcNow) { return enabled && (attempted == DateTime.MinValue || utcNow - attempted >= TimeSpan.FromHours(IntervalHours)); }
+        public static bool Due(bool enabled, DateTime attempted, DateTime utcNow) { return enabled && (attempted == DateTime.MinValue || utcNow < attempted || utcNow - attempted >= TimeSpan.FromHours(IntervalHours)); }
         public static string DownloadFeed()
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;

@@ -29,6 +29,7 @@ namespace TeamCalendar
             var utc = new DateTime(2026, 11, 12, 0, 0, 0, DateTimeKind.Utc);
             Check(UpdatePolicy.Due(true, DateTime.MinValue, utc) && !UpdatePolicy.Due(false, DateTime.MinValue, utc), "startup check respects the update toggle", checks);
             Check(!UpdatePolicy.Due(true, utc, utc.AddHours(6).AddSeconds(-1)) && UpdatePolicy.Due(true, utc, utc.AddHours(6)), "six-hour cadence includes failed attempts", checks);
+            Check(UpdatePolicy.Due(true, utc, utc.AddHours(12)) && UpdatePolicy.Due(true, utc, utc.AddMinutes(-1)), "wake and clock changes do not indefinitely delay update checks", checks);
             var original = new FeatureState { updateNotifications = true, autoSyncEnabled = false };
             var pending = new CalendarSettingsDraft(original, new Settings(), false, false, new FeatureState.Profile[0]);
             using (var dialog = new CalendarAdvancedSettings(pending, delegate { }))

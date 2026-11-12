@@ -60,6 +60,9 @@ class UpdateTests(unittest.TestCase):
     def test_version_validation(self):
         self.assertEqual(version('5.6.0'),version('5.6.0.0'))
         for value in ['5.6','5.6.0-beta','5.6.0/path','']:self.assertIsNone(version(value))
+    def test_wake_and_wall_clock_changes(self):
+        self.assertTrue(due(True,100000,100000+12*3600))
+        self.assertTrue(due(True,100000,99999))
 
 
 if __name__=='__main__':unittest.main()

@@ -63,7 +63,7 @@ def fetch(current):
 
 
 def due(enabled,last,at):
-    return enabled and (last is None or at-last>=INTERVAL)
+    return enabled and (last is None or at<last or at-last>=INTERVAL)
 
 
 class UpdateState:
@@ -77,7 +77,7 @@ class UpdateState:
             self.generation+=1; self.pending=None; self.enabled=enabled
             if enabled:self.last=None
     def begin(self,manual=False,at=None):
-        self.configure(); at=time.monotonic() if at is None else at
+        self.configure(); at=time.time() if at is None else at
         if not manual and not due(self.enabled,self.last,at): return None
         self.last=at
         return self.generation
