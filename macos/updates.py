@@ -2,6 +2,7 @@
 import json
 import platform
 import re
+import ssl
 import time
 import urllib.request
 from urllib.parse import urlparse,unquote
@@ -48,9 +49,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs): return None
 
 
+def tls_context():
+    import certifi
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def fetch(current):
     request=urllib.request.Request(FEED,headers={'User-Agent':'DesktopCalendarWidget/'+current,'Accept':'application/vnd.github+json'})
-    with urllib.request.build_opener(NoRedirect).open(request,timeout=12) as response:
+    with urllib.request.build_opener(NoRedirect,urllib.request.HTTPSHandler(context=tls_context())).open(request,timeout=12) as response:
         data=response.read(LIMIT+1)
     if len(data)>LIMIT: raise ValueError('업데이트 응답이 너무 큽니다.')
     return json.loads(data.decode('utf-8'))

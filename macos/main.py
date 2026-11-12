@@ -10,6 +10,12 @@ from pathlib import Path
 def main():
     for stream in (sys.stdin,sys.stdout,sys.stderr):
         if stream is not None and hasattr(stream,'reconfigure'): stream.reconfigure(encoding='utf-8')
+    if '--updates-test' in sys.argv:
+        from updates import tls_context,fetch
+        from core import VERSION
+        result={'trusted_roots':len(tls_context().get_ca_certs())}
+        if '--live' in sys.argv: result['public_feed_read']=isinstance(fetch(VERSION),list)
+        print(json.dumps(result),flush=True); return
     from bridge import mcp,send
     if '--mcp' in sys.argv: mcp(); return
     if '--command' in sys.argv:

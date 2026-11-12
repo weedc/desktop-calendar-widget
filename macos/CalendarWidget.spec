@@ -4,7 +4,7 @@ from importlib import metadata
 root = Path(SPECPATH)
 licenses=[(str(root/'THIRD_PARTY_NOTICES.md'),'ThirdPartyLicenses')]
 for name in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6','pyobjc-core',
-             'pyobjc-framework-Cocoa','pyobjc-framework-Quartz','pyobjc-framework-UserNotifications','tzdata'):
+             'pyobjc-framework-Cocoa','pyobjc-framework-Quartz','pyobjc-framework-UserNotifications','tzdata','certifi'):
     distribution=metadata.distribution(name)
     for file in distribution.files or []:
         if '/licenses/' in str(file).lower() or file.name.upper().startswith(('LICENSE','COPYING','COPYRIGHT')):
