@@ -255,7 +255,7 @@ class Settings(QDialog):
             if self.connection_changed: self.owner.google_reader.reset()
             self.owner.configure()
             self.accept()
-            self.owner.refresh()
+            self.owner.refresh(allow_initial=True)
             if self.open_codex: self.owner.codex_dialog()
         except Exception as error:
             self.status.setText(str(error))
@@ -423,7 +423,7 @@ class CalendarWindow(QWidget):
 
     def start(self):
         if not self.store.options['setup_completed']: self.settings()
-        elif self.store.options['auto_sync']: self.refresh()
+        elif self.store.options['auto_sync']: self.refresh(allow_initial=True)
         self.tick()
 
     def configure(self):
@@ -451,16 +451,16 @@ class CalendarWindow(QWidget):
         if self.settings_window and self.settings_window.isVisible(): self.settings_window.raise_(); return
         self.settings_window=Settings(self); self.settings_window.show(); self.settings_window.raise_(); self.settings_window.activateWindow()
 
-    def refresh(self):
-        self.request_month(self.month)
+    def refresh(self,allow_initial=False):
+        self.request_month(self.month,allow_initial=allow_initial)
 
-    def request_month(self,month,automatic=False):
+    def request_month(self,month,automatic=False,allow_initial=False):
         if self.demo: return
         if automatic and not self.store.options['auto_sync']: return
         if not month_valid(month): raise ValueError('YYYY-MM 형식으로 입력하세요.')
         if self.busy:
             if not automatic: self.pending=[p for p in self.pending if p[1]]
-            self.pending=[p for p in self.pending if p[0]!=month]+[(month,automatic)]
+            self.pending=[p for p in self.pending if p[0]!=month]+[(month,automatic,allow_initial)]
             return
         sources=copy.deepcopy(self.store.sources()); email=self.store.options['account_email']
         if not any(s.get('enabled',True) for s in sources): self.status='표시할 캘린더가 없습니다'; self.update(); return
@@ -478,7 +478,7 @@ class CalendarWindow(QWidget):
         def failed(message):
             self.busy=False; self.status=message; self.update()
             if self.pending: self.request_month(*self.pending.pop(0))
-        self.pool.start(Job(lambda: self.google_reader.read_month(month,sources,email),finished,failed))
+        self.pool.start(Job(lambda: self.google_reader.read_month(month,sources,email,allow_initial=allow_initial),finished,failed))
 
     def tick(self):
         if self.demo: return

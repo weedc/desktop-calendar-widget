@@ -50,83 +50,95 @@ class ReaderTests(unittest.TestCase):
     sources=[dict(id='demo@example.invalid',name='가상 캘린더',enabled=True,color='#487F91')]
     def setUp(self): patch('google_reader.time.sleep').start()
     def tearDown(self): patch.stopall()
+    def test_cold_refresh_never_opens_a_window_before_explicit_connection(self):
+        reader=FixtureReader()
+        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources)['errors'])
+        self.assertEqual(reader.browser.creations,0); self.assertEqual(reader.browser.phase,'new')
+        self.assertFalse(reader.read_month('2026-11',self.sources,allow_initial=True)['errors'])
+        self.assertEqual(reader.browser.creations,1)
     def test_refresh_and_multiple_month_requests_keep_one_hidden_window(self):
         reader=FixtureReader()
+        self.assertEqual(reader.read_month('2026-11',self.sources,allow_initial=True)['errors'],[])
         for _ in range(3): self.assertEqual(reader.read_month('2026-11',self.sources)['errors'],[])
         self.assertEqual(reader.browser.creations,1); self.assertEqual(reader.browser.phase,'hidden'); self.assertEqual(reader.browser.window_id,101)
         reads=reader.browser.scripts[2:]
         self.assertFalse(any('make new window' in s or 'set visible of w to true' in s or 'activate' in s for s in reads))
     def test_multiple_calendars_share_the_same_reader(self):
         reader=FixtureReader(); sources=self.sources+[{**self.sources[0],'id':'other@example.invalid'}]
-        self.assertEqual(len(reader.read_month('2026-11',sources)['outcomes']),2)
+        self.assertEqual(len(reader.read_month('2026-11',sources,allow_initial=True)['outcomes']),2)
         self.assertEqual(reader.browser.creations,1)
     def test_disabled_sources_never_create_a_window(self):
-        reader=FixtureReader(); reader.read_month('2026-11',[{**self.sources[0],'enabled':False}]); self.assertEqual(reader.browser.creations,0)
+        reader=FixtureReader(); reader.read_month('2026-11',[{**self.sources[0],'enabled':False}],allow_initial=True); self.assertEqual(reader.browser.creations,0)
     def test_missing_window_is_never_recreated_by_repeated_reads(self):
-        reader=FixtureReader(); reader.read_month('2026-11',self.sources); reader.browser.windows.clear()
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources,allow_initial=True); reader.browser.windows.clear()
         for _ in range(3):
-            result=reader.read_month('2026-11',self.sources); self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{})
+            result=reader.read_month('2026-11',self.sources,allow_initial=True); self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{})
         self.assertEqual(reader.browser.creations,1)
     def test_closed_chrome_is_not_automatically_relaunched(self):
-        reader=FixtureReader(); reader.read_month('2026-11',self.sources); reader.browser.running=False
-        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources)['errors'])
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources,allow_initial=True); reader.browser.running=False
+        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources,allow_initial=True)['errors'])
         self.assertEqual(reader.browser.creations,1); self.assertFalse(reader.browser.running)
     def test_user_taken_window_is_not_navigated_restored_or_closed(self):
-        reader=FixtureReader(); reader.read_month('2026-11',self.sources); reader.browser.taken=True
-        self.assertTrue(reader.read_month('2026-11',self.sources)['errors']); reader.close()
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources,allow_initial=True); reader.browser.taken=True
+        self.assertTrue(reader.read_month('2026-11',self.sources,allow_initial=True)['errors']); reader.close()
         self.assertIn(101,reader.browser.windows); self.assertEqual(reader.browser.creations,1)
     def test_initial_failure_cannot_create_popup_on_next_poll(self):
         reader=FixtureReader(); reader.browser.fail_create=True
-        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources)['errors'])
+        for _ in range(3): self.assertTrue(reader.read_month('2026-11',self.sources,allow_initial=True)['errors'])
         self.assertEqual(reader.browser.creations,1)
     def test_incomplete_page_is_hidden_and_not_accepted_as_empty_success(self):
         reader=FixtureReader(); reader.snapshot['cells']=[]
-        result=reader.read_month('2026-11',self.sources)
+        result=reader.read_month('2026-11',self.sources,allow_initial=True)
         self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{}); self.assertEqual(reader.browser.phase,'lost')
-        reader.read_month('2026-11',self.sources); self.assertEqual(reader.browser.creations,1)
+        reader.read_month('2026-11',self.sources,allow_initial=True); self.assertEqual(reader.browser.creations,1)
     def test_overflow_read_keeps_stable_ids_and_closes_popup(self):
         reader=FixtureReader(); reader.snapshot['cells'][0].update(label='일정 1개, 11월 1일',more=True)
         reader.expanded=['오후 2:30, 가상 미팅, 캘린더: 예시, 위치: 회의실, 2026년 11월 1일']
-        result=reader.read_month('2026-11',self.sources); self.assertFalse(result['errors'])
+        result=reader.read_month('2026-11',self.sources,allow_initial=True); self.assertFalse(result['errors'])
         event=result['outcomes'][self.sources[0]['id']][0]
         self.assertEqual(event['uid'],'DBD6656405DA940F708D'); self.assertEqual(event['sort'],870); self.assertTrue(reader.dismissed)
     def test_failed_overflow_does_not_replace_cache_with_partial_data(self):
         reader=FixtureReader(); reader.snapshot['cells'][0].update(label='일정 2개, 11월 1일',more=True)
-        result=reader.read_month('2026-11',self.sources); self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{}); self.assertTrue(reader.dismissed)
+        result=reader.read_month('2026-11',self.sources,allow_initial=True); self.assertTrue(result['errors']); self.assertEqual(result['outcomes'],{}); self.assertTrue(reader.dismissed)
     def test_cancel_does_not_start_another_connection(self):
-        reader=FixtureReader(); reader.cancel(); self.assertEqual(reader.read_month('2026-11',self.sources)['outcomes'],{}); self.assertEqual(reader.browser.creations,0)
+        reader=FixtureReader(); reader.cancel(); self.assertEqual(reader.read_month('2026-11',self.sources,allow_initial=True)['outcomes'],{}); self.assertEqual(reader.browser.creations,0)
     def test_only_explicit_reset_permits_a_new_first_connection(self):
-        reader=FixtureReader(); reader.read_month('2026-11',self.sources); original=reader.browser
+        reader=FixtureReader(); reader.read_month('2026-11',self.sources,allow_initial=True); original=reader.browser
         with patch('google_reader.GoogleBrowser',ScriptedChrome): reader.reset()
-        reader.read_month('2026-11',self.sources)
+        reader.read_month('2026-11',self.sources,allow_initial=True)
         self.assertEqual(original.phase,'closed'); self.assertEqual(reader.browser.creations,1)
 
 
 class BrowserTests(unittest.TestCase):
+    def test_default_navigation_cannot_create_a_first_window(self):
+        browser=ScriptedChrome()
+        for _ in range(3):
+            with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        self.assertEqual(browser.creations,0); self.assertEqual(browser.phase,'new')
     def test_background_scripts_guard_against_launching_a_stopped_chrome(self):
-        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.hide()
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True); browser.hide()
         browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
         self.assertTrue(browser.scripts[-1].startswith('if not (application "Google Chrome" is running)'))
         self.assertNotIn('make new window',browser.scripts[-1]); self.assertNotIn('set visible of w to true',browser.scripts[-1])
     def test_login_read_does_not_inspect_credentials(self):
-        browser=ScriptedChrome(); browser.navigate('https://accounts.google.com/ServiceLogin?continue='+browser.tag); browser.login=True
+        browser=ScriptedChrome(); browser.navigate('https://accounts.google.com/ServiceLogin?continue='+browser.tag,allow_initial=True); browser.login=True
         with self.assertRaises(LoginRequired): browser.evaluate('1')
         self.assertIn('if u does not start with "https://calendar.google.com/" then return',browser.scripts[-1])
         self.assertEqual(browser.creations,1)
     def test_browser_uses_existing_chrome_without_debug_ports_or_private_profiles(self):
-        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True)
         source='\n'.join(browser.scripts)
         for unwanted in ('remote-debugging','user-data-dir','headless','minimized of w to false'): self.assertNotIn(unwanted,source)
     def test_invalid_origin_does_not_touch_an_owned_window(self):
         browser=ScriptedChrome()
-        with self.assertRaises(ValueError): browser.navigate('https://calendar.google.com.example.invalid/')
+        with self.assertRaises(ValueError): browser.navigate('https://calendar.google.com.example.invalid/',allow_initial=True)
         self.assertEqual(browser.scripts,[])
     def test_closed_session_cannot_reopen(self):
-        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.hide(); browser.close()
-        with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed')
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True); browser.hide(); browser.close()
+        with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed',allow_initial=True)
         self.assertEqual(browser.creations,1)
     def test_window_ownership_checked_before_navigation_and_close(self):
-        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.hide(); browser.close()
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True); browser.hide(); browser.close()
         for script in browser.scripts[1:]: self.assertIn('WIDGET_WINDOW_TAKEN_OVER',script)
     def test_apple_script_quoting_preserves_unicode_as_data(self):
         value='한글 "문장"\n끝\\기호'
@@ -145,8 +157,8 @@ class BrowserTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform=='darwin' and Path('/Applications/Google Chrome.app').exists(),'requires native Mac with Chrome')
 class NativeMacTests(unittest.TestCase):
     def test_b_compile_real_chrome_scripts(self):
-        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
-        browser.evaluate('({value:"가상 데이터"})'); browser.hide(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag); browser.close()
+        browser=ScriptedChrome(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True)
+        browser.evaluate('({value:"가상 데이터"})'); browser.hide(); browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True); browser.close()
         with tempfile.TemporaryDirectory() as folder:
             for index,script in enumerate(browser.scripts):
                 result=subprocess.run(['/usr/bin/osacompile','-o',str(Path(folder)/f'check{index}.scpt')],input=script,text=True,encoding='utf-8',capture_output=True)
@@ -155,7 +167,7 @@ class NativeMacTests(unittest.TestCase):
         probe=lambda:subprocess.run(['/usr/bin/osascript','-e','application "Google Chrome" is running'],capture_output=True,text=True,check=True).stdout.strip()
         if probe()!='false': self.skipTest('Chrome already running; preserve its windows')
         browser=GoogleBrowser(); browser.phase='hidden'; browser.window_id=999999
-        with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag)
+        with self.assertRaises(RuntimeError): browser.navigate('https://calendar.google.com/calendar/embed?widget_reader='+browser.tag,allow_initial=True)
         self.assertEqual(probe(),'false')
 
     def test_c_real_hidden_window_reuses_without_visibility_or_recreation(self):
@@ -189,7 +201,7 @@ class NativeMacTests(unittest.TestCase):
                 if not onscreen(): self.skipTest('runner did not expose a Chrome GUI window; no permission was changed')
                 print('Native Chrome probe: initial frame exists; checking Apple Events',flush=True)
                 try:
-                    browser.navigate(url('202611'))
+                    browser.navigate(url('202611'),allow_initial=True)
                     ready=False
                     deadline=time.monotonic()+10
                     while time.monotonic()<deadline:
@@ -222,7 +234,7 @@ class NativeMacTests(unittest.TestCase):
                 browser.apple(browser.scope()+'close w\nend tell')
                 remaining=browser.apple('tell application "Google Chrome" to return count of windows')
                 for _ in range(3):
-                    with self.assertRaises(RuntimeError): browser.navigate(url('202611'))
+                    with self.assertRaises(RuntimeError): browser.navigate(url('202611'),allow_initial=True)
                 self.assertEqual(browser.apple('tell application "Google Chrome" to return count of windows'),remaining)
             except Exception:
                 if os.environ.get('GITHUB_ACTIONS')=='true':

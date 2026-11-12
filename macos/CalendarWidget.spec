@@ -23,7 +23,7 @@ coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='GoogleCal
 app = BUNDLE(coll, name='Team Calendar Widget.app', icon=str(root/'build/calendar.icns'),
              bundle_identifier='io.github.weedc.desktop-calendar-widget',
              info_plist={'CFBundleName':'Team Calendar Widget','CFBundleDisplayName':'팀 캘린더 위젯',
-                 'CFBundleShortVersionString':'5.7.0','CFBundleVersion':'5.7.0',
+                 'CFBundleShortVersionString':'5.7.1','CFBundleVersion':'5.7.1',
                  'LSMinimumSystemVersion':'14.0','LSUIElement':True,
                  'NSHighResolutionCapable':True,
                  'NSAppleEventsUsageDescription':'기존 Chrome 로그인으로 선택한 Google 캘린더를 읽습니다. 처음 연결한 읽기창을 숨겨 재사용합니다.',

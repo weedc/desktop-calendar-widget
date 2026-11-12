@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -117,10 +117,10 @@ namespace TeamCalendar
         readonly ChromeReaderWindow connection;
         public CalendarReader(CalendarSource source) { Source = source; connection = new ChromeReaderWindow(source); }
         public IntPtr Window { get { return connection.Window; } }
-        public MonthData Read(DateTime month, bool reload)
+        public MonthData Read(DateTime month, bool reload, bool allowInitialConnection = false)
         {
             month = new DateTime(month.Year, month.Month, 1);
-            var result = Parse(connection.Snapshot(month, reload), month, Source);
+            var result = Parse(connection.Snapshot(month, reload, allowInitialConnection), month, Source);
             App.Log("Existing Chrome read month=" + result.month + ", day occurrences=" + result.events.Count);
             return result;
         }
@@ -282,7 +282,7 @@ namespace TeamCalendar
                 else Pin(settings.Desktop);
                 Location = initialPosition; SetOpacity(settings.Opacity); UpdateMonthLabel();
                 if (pinned) Win.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0013);
-                App.Log("Widget HWND=" + Handle.ToInt64()); Bridge.Start(this); pulse.Start(); LoadCachedMonth(month); if (features.autoSyncEnabled) RefreshMonth(false); else { syncMessage = "저장된 일정 · ↻ 버튼으로 새로고침"; Invalidate(); }
+                App.Log("Widget HWND=" + Handle.ToInt64()); Bridge.Start(this); pulse.Start(); LoadCachedMonth(month); if (features.autoSyncEnabled) RefreshMonth(false, null, true); else { syncMessage = "저장된 일정 · 설정에서 Google 연결 후 새로고침"; Invalidate(); }
                 if (!features.setupCompleted) BeginInvoke((Action)delegate { ShowCalendarManager(true); });
                 Win.RepaintDesktop();
             };
@@ -325,7 +325,7 @@ namespace TeamCalendar
                 if (dialog.ShowDialog() == DialogResult.OK) SetMonth(picker.Value);
             }
         }
-        void RefreshMonth(bool force, DateTime? backgroundMonth = null)
+        void RefreshMonth(bool force, DateTime? backgroundMonth = null, bool allowInitialConnection = false)
         {
             if (shuttingDown) return;
             DateTime requested = backgroundMonth.HasValue ? backgroundMonth.Value : month;
@@ -335,7 +335,7 @@ namespace TeamCalendar
             Task.Run(delegate
             {
                 MonthData data = null; string error = null;
-                try { data = reader.Read(requested, force); } catch (Exception e) { error = e.Message; App.Log("Sync failed: " + e.GetType().Name + ": " + e.Message); }
+                try { data = reader.Read(requested, force, allowInitialConnection); } catch (Exception e) { error = e.Message; App.Log("Sync failed: " + e.GetType().Name + ": " + e.Message); }
                 if (shuttingDown) return;
                 BeginInvoke((Action)delegate
                 {

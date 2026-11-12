@@ -42,7 +42,7 @@ namespace TeamCalendar
         {
             if (calendarManager != null && !calendarManager.IsDisposed) { calendarManager.Activate(); return; }
             string before = App.Json.Serialize(new { features.calendars, features.chromeProfile, features.googleUser, features.connectionMode, features.accountCalendars, features.accountProfile, features.accountEmail });
-            var dialog = new CalendarManager(features, settings, pinned, StartupEnabled(), ShowCodexDialog, TestDailySummary, initialSetup);
+            var dialog = new CalendarManager(features, settings, pinned, StartupRegistration.ForSetup(features.setupCompleted), ShowCodexDialog, TestDailySummary, initialSetup);
             calendarManager = dialog;
             dialog.FormClosed += delegate
             {
@@ -71,7 +71,7 @@ namespace TeamCalendar
         {
             cache.Clear(); syncAttempts.Clear(); LoadCachedMonth(month); UpdateCalendarTitle(); Invalidate();
             if (loading) { reloadCalendars = true; return; }
-            reader.Reconfigure(features); RefreshMonth(true);
+            reader.Reconfigure(features); RefreshMonth(true, null, true);
         }
         void ShowDay(DateTime day)
         {
@@ -175,7 +175,7 @@ namespace TeamCalendar
         bool TryFeatureCommand(Dictionary<string, object> args, out object result)
         {
             result = null; string command = App.Str(args, "command");
-            if (command == "status") result = new { calendarId = features.ActiveCalendars().FirstOrDefault(s => s.enabled) == null ? "" : features.ActiveCalendars().First(s => s.enabled).id, calendars = features.ActiveCalendars(), connectionMode = features.connectionMode, calendar = nameLabel.Text, month = month.ToString("yyyy-MM"), loading = loading, autoSyncEnabled = features.autoSyncEnabled, autoSyncMinutes = SyncPolicy.Minutes, compactEmojis = features.compactEmojis, density = EmojiData.Density(GridBounds.Width / 7F, GridBounds.Height / (float)rowCount, features.compactEmojis).ToString(), syncStarted = syncStarted, syncCompleted = syncCompleted, message = SyncStatus, opacity = settings.Opacity, desktop = pinned, visible = Visible, processId = System.Diagnostics.Process.GetCurrentProcess().Id, windowId = Handle.ToInt64(), readerWindowId = reader.Window.ToInt64(), readerMode = "existing_chrome_hidden", bounds = new { x = PointToScreen(Point.Empty).X, y = PointToScreen(Point.Empty).Y, width = Width, height = Height }, noteCount = features.notes.Count, selectedDay = dayDetails == null || dayDetails.IsDisposed ? null : dayDetails.Day.ToString("yyyy-MM-dd"), detailsWindowId = dayDetails == null || dayDetails.IsDisposed ? 0 : dayDetails.Handle.ToInt64(), settingsWindowId = calendarManager == null || calendarManager.IsDisposed ? 0 : calendarManager.Handle.ToInt64(), reminderMinutes = features.reminderMinutes, remindersEnabled = features.remindersEnabled, lastBalloonShown = lastBalloon == DateTime.MinValue ? null : lastBalloon.ToString("o") };
+            if (command == "status") result = new { calendarId = features.ActiveCalendars().FirstOrDefault(s => s.enabled) == null ? "" : features.ActiveCalendars().First(s => s.enabled).id, calendars = features.ActiveCalendars(), connectionMode = features.connectionMode, calendar = nameLabel.Text, month = month.ToString("yyyy-MM"), loading = loading, autoSyncEnabled = features.autoSyncEnabled, autoSyncMinutes = SyncPolicy.Minutes, startupEnabled = StartupEnabled(), desktopShortcutExists = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "팀 캘린더 위젯.lnk")), compactEmojis = features.compactEmojis, density = EmojiData.Density(GridBounds.Width / 7F, GridBounds.Height / (float)rowCount, features.compactEmojis).ToString(), syncStarted = syncStarted, syncCompleted = syncCompleted, message = SyncStatus, opacity = settings.Opacity, desktop = pinned, visible = Visible, processId = System.Diagnostics.Process.GetCurrentProcess().Id, windowId = Handle.ToInt64(), readerWindowId = reader.Window.ToInt64(), readerMode = "existing_chrome_hidden", bounds = new { x = PointToScreen(Point.Empty).X, y = PointToScreen(Point.Empty).Y, width = Width, height = Height }, noteCount = features.notes.Count, selectedDay = dayDetails == null || dayDetails.IsDisposed ? null : dayDetails.Day.ToString("yyyy-MM-dd"), detailsWindowId = dayDetails == null || dayDetails.IsDisposed ? 0 : dayDetails.Handle.ToInt64(), settingsWindowId = calendarManager == null || calendarManager.IsDisposed ? 0 : calendarManager.Handle.ToInt64(), reminderMinutes = features.reminderMinutes, remindersEnabled = features.remindersEnabled, lastBalloonShown = lastBalloon == DateTime.MinValue ? null : lastBalloon.ToString("o") };
             else if (command == "events")
             {
                 string key = App.Str(args, "month", month.ToString("yyyy-MM")); MonthData data;
@@ -201,6 +201,7 @@ namespace TeamCalendar
             else if (command == "emoji_clear") { string key = App.Str(args, "key"); var item = ActiveItems().FirstOrDefault(e => EmojiData.Key(e) == key); if (item == null) throw new ArgumentException("현재 일정을 선택해 주세요."); ResetEmoji(item, "", false); result = new { ok = true }; }
             else if (command == "emoji_editor") { string key = App.Str(args, "key"); var item = ActiveItems().FirstOrDefault(e => EmojiData.Key(e) == key); if (item == null) throw new ArgumentException("현재 일정을 선택해 주세요."); ShowEmojiEditor(item); result = new { windowId = emojiDialog.Handle.ToInt64() }; }
             else if (command == "window_status") result = new { taskbar = ShowInTaskbar, trayVisible = tray.Visible, visible = Visible, desktop = pinned, state = WindowState.ToString(), windowId = Handle.ToInt64() };
+            else if (command == "startup_settings") { if (args.ContainsKey("enabled")) StartupRegistration.Set(App.Str(args, "enabled").ToLowerInvariant() == "true"); result = new { enabled = StartupEnabled() }; }
             else if (command == "emoji_settings") { features.compactEmojis = App.Str(args, "enabled", "true").ToLowerInvariant() == "true"; SaveFeatures(); result = new { enabled = features.compactEmojis }; }
             else if (command == "open_settings") { ShowCalendarManager(); result = new { windowId = calendarManager.Handle.ToInt64() }; }
             else if (command == "account_catalog") result = AccountDiscovery.Status();

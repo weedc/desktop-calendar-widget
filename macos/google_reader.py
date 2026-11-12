@@ -23,7 +23,7 @@ class GoogleReader:
     def reset(self): self.browser.close(); self.browser = GoogleBrowser()
     def open_login(self, email=''): return self.discover(email)
 
-    def read_month(self, month, sources, email=''):
+    def read_month(self, month, sources, email='', allow_initial=False):
         successes, errors = {}, []
         with self.browser.gate:
             for source in sources:
@@ -36,7 +36,7 @@ class GoogleReader:
                 if email:
                     query['authuser'] = email
                 try:
-                    self.browser.navigate('https://calendar.google.com/calendar/embed?' + urlencode(query))
+                    self.browser.navigate('https://calendar.google.com/calendar/embed?' + urlencode(query),allow_initial=allow_initial)
                     snapshot = None; stable = 0
                     for _ in range(85):
                         if self.cancelled.is_set(): raise RuntimeError('위젯 종료 중')
@@ -69,7 +69,7 @@ class GoogleReader:
                             else: raise RuntimeError('일정 펼침 창을 닫지 못했습니다. 기존 데이터를 유지합니다.')
                     successes[source['id']] = parse_snapshot(snapshot or {}, month, source)
                 except Exception as error:
-                    if self.browser.phase!='hidden':
+                    if self.browser.phase not in ('hidden','new'):
                         try: self.browser.hide()
                         except Exception: pass
                         self.browser.phase='lost'
@@ -87,7 +87,7 @@ class GoogleReader:
         def script(name,value=None): return browser.evaluate('('+SCRIPTS[name]+')('+json.dumps(value,ensure_ascii=True)+')')
         with self.browser.gate:
             try:
-                browser.navigate(login)
+                browser.navigate(login,allow_initial=True)
                 catalog=None
                 for _ in range(400):
                     if self.cancelled.is_set(): raise RuntimeError('위젯 종료 중')

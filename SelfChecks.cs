@@ -82,6 +82,9 @@ namespace TeamCalendar
                 emojiState.autoSyncEnabled = false; emojiState.compactEmojis = false; emojiState.Save(path); var loadedEmoji = FeatureState.Load(path);
                 Require(!loadedEmoji.autoSyncEnabled && !loadedEmoji.compactEmojis && loadedEmoji.emojis.Count == 1 && loadedEmoji.projectEmojis.Count == 1, "sync switches and manual emoji cache survive restart", checks);
                 Require(StartupRegistration.Owned("\"" + executable + "\"", Path.GetDirectoryName(executable)), "startup migration recognizes older versions in this install directory", checks);
+                Require(StartupRegistration.DefaultEnabled(false, false, null), "new installations enable login startup by default", checks);
+                Require(!StartupRegistration.DefaultEnabled(true, false, null) && StartupRegistration.DefaultEnabled(true, true, null), "legacy installation startup choices survive upgrade", checks);
+                Require(!StartupRegistration.DefaultEnabled(false, true, false) && StartupRegistration.DefaultEnabled(true, false, true), "saved startup choice overrides installation defaults", checks);
                 Require(!StartupRegistration.Owned("\"" + Path.Combine(Path.GetTempPath(), "Other", "GoogleCalendarWidget-v5.exe") + "\"", Path.GetDirectoryName(executable)) && !StartupRegistration.Owned(Path.Combine(Path.GetDirectoryName(executable), "another.exe"), Path.GetDirectoryName(executable)), "startup migration preserves unrelated applications", checks);
                 Require(EmojiData.StickerSize(52) + 29 <= 52 && EmojiData.StickerSize(80) + 29 <= 80, "stickers fit the smallest six-week calendar cells", checks);
                 var zero = DateTimeOffset.Parse("2026-11-10T15:00:00Z");

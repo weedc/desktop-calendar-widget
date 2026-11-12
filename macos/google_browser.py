@@ -59,11 +59,12 @@ class GoogleBrowser:
             'set owned to (execute active tab of w javascript "window.__desktopCalendarOwner || \'\'") is '+quote(self.tag)+'\nend if\n'
             'if not owned then error "WIDGET_WINDOW_TAKEN_OVER"\n')
 
-    def navigate(self,url):
+    def navigate(self,url,allow_initial=False):
         if not official_url(url) and not (self.phase=='new' and url.startswith('https://accounts.google.com/ServiceLogin?')):
             raise ValueError('Google Calendar 공식 주소만 열 수 있습니다.')
         with self.gate:
             if self.phase=='new':
+                if not allow_initial: raise RuntimeError('읽기 연결이 없습니다. 새로고침은 창을 열지 않습니다. 설정에서 Google 계정을 연결해 주세요.')
                 self.phase='connecting'
                 try:
                     self.window_id=int(self.apple('tell application "Google Chrome"\nset w to make new window\n'
