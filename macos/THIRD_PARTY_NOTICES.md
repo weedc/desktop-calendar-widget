@@ -1,5 +1,7 @@
 # Bundled runtime components
 
+Certifi supplies Mozilla's CA certificates for update checks (MPL 2.0): https://github.com/certifi/python-certifi
+
 The macOS app includes Python, PySide6 / Qt, Shiboken, PyObjC, websocket-client, psutil and the IANA time-zone database. Their licenses remain with their respective authors. License files supplied by the installed distributions are copied into the app's `Contents/Resources/ThirdPartyLicenses` folder.
 
 Qt for Python's community distribution offers LGPLv3/GPLv3 licensing. The app uses the dynamically linked Qt libraries and ships them as separate libraries/frameworks; this packaging does not forbid users from replacing them or debugging modifications. The app is ad-hoc signed and a modified bundle must be signed again locally to run on macOS.

@@ -15,6 +15,12 @@ def main():
         index = sys.argv.index('--google-background')
         if len(sys.argv) != index+3: raise SystemExit('Invalid background entry')
         raise SystemExit(background_main(sys.argv[index+1],sys.argv[index+2]))
+    if '--updates-test' in sys.argv:
+        from updates import tls_context,fetch
+        from core import VERSION
+        result={'trusted_roots':len(tls_context().get_ca_certs())}
+        if '--live' in sys.argv: result['public_feed_read']=isinstance(fetch(VERSION),list)
+        print(json.dumps(result),flush=True); return
     from bridge import mcp,send
     if '--mcp' in sys.argv: mcp(); return
     if '--command' in sys.argv:

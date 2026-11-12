@@ -29,7 +29,7 @@ jobs:
         run: |
           python3 -m pip install -r macos/requirements.txt
           cd macos
-          python3 -m unittest -v test_core.py test_google_reader.py
+          python3 -m unittest discover -v -s . -p 'test_*.py'
       - name: Exercise native UI with synthetic data
         run: python3 macos/main.py --smoke-test
         env:

@@ -55,6 +55,7 @@ namespace TeamCalendar
         static void Main(string[] args)
         {
             Directory.CreateDirectory(DataDir);
+            if (args.Contains("--updates-test")) { OpenStdio(); try { Console.WriteLine(Json.Serialize(UpdateChecks.Run(args.Contains("--live")))); } catch (Exception e) { Console.WriteLine(Json.Serialize(new { error = e.Message })); Environment.ExitCode = 1; } return; }
             if (args.Contains("--self-test")) { OpenStdio(); try { Console.WriteLine(Json.Serialize(SelfChecks.Run())); } catch (Exception e) { Console.WriteLine(Json.Serialize(new { error = e.Message })); Environment.ExitCode = 1; } return; }
             if (args.Contains("--mcp")) { Mcp.Run(); return; }
             if (args.Contains("--command"))

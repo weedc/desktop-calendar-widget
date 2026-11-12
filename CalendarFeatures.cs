@@ -22,7 +22,8 @@ namespace TeamCalendar
             menu.Items.Insert(1, new ToolStripSeparator());
             menu.Items.Insert(1, new ToolStripMenuItem("Codex · Dot 연동", null, delegate { ShowCodexDialog(); }));
             tray.BalloonTipShown += delegate { lastBalloon = DateTime.Now; App.Log("Windows notification shown."); };
-            tray.BalloonTipClicked += delegate { ShowWidget(); ShowDay(DailySummaryPolicy.Seoul(DateTimeOffset.Now).Date); };
+            tray.BalloonTipClicked += delegate { if (OpenUpdateNotice()) return; ShowWidget(); ShowDay(DailySummaryPolicy.Seoul(DateTimeOffset.Now).Date); };
+            InitializeUpdates();
             FormClosed += delegate { if (dayDetails != null && !dayDetails.IsDisposed) dayDetails.Close(); if (codexDialog != null && !codexDialog.IsDisposed) codexDialog.Close(); if (emojiDialog != null && !emojiDialog.IsDisposed) emojiDialog.Close(); };
             UpdateCalendarTitle();
         }
@@ -136,6 +137,7 @@ namespace TeamCalendar
         void FeaturePulse()
         {
             if ((DateTime.Now - reminderCheck).TotalSeconds >= 10) { reminderCheck = DateTime.Now; TickDailySummary(DateTimeOffset.Now); TickReminders(); }
+            TickUpdates();
 
         }
         List<ReminderRecord> CalculateReminders(DateTimeOffset now)

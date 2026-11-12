@@ -13,6 +13,8 @@ requests=[dict(jsonrpc='2.0',id=1,method='initialize'),dict(jsonrpc='2.0',id=2,m
 result=subprocess.run([str(binary),'--mcp'],input='\n'.join(map(json.dumps,requests))+'\n',text=True,encoding='utf-8',capture_output=True,check=True)
 lines=[json.loads(line) for line in result.stdout.splitlines()]
 assert len(lines)==2 and len(lines[1]['result']['tools'])==26
+tls=subprocess.run([str(binary),'--updates-test'],text=True,encoding='utf-8',capture_output=True,check=True)
+assert json.loads(tls.stdout)['trusted_roots']>100
 for path in root.rglob('*'):
     assert path.name not in {'calendar-data.json','config.toml','settings-v2.xml','ex.png'}
     assert not path.name.startswith('events-')

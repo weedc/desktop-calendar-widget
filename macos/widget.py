@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
-from PySide6.QtCore import Qt, QObject, Signal, QRunnable, QThreadPool, QTimer, QRectF, QUrl
+from PySide6.QtCore import Qt, QObject, Signal, Slot, QRunnable, QThreadPool, QTimer, QRectF, QUrl
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QLinearGradient, QPen, QFont, QIcon, QPixmap, QDesktopServices, QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QLineEdit, QListWidget, QListWidgetItem,
@@ -52,15 +52,29 @@ def button(text, function, layout):
 class JobSignals(QObject):
     done = Signal(object)
     error = Signal(str)
+    def __init__(self,completed,failed):
+        # Keep queued results alive after QRunnable returns and deliver them on
+        # the application's thread, including callbacks supplied as closures.
+        super().__init__(QApplication.instance())
+        self.completed=completed; self.failed=failed
+        self.done.connect(self.deliver_done); self.error.connect(self.deliver_error)
+
+    @Slot(object)
+    def deliver_done(self,value):
+        try:self.completed(value)
+        finally:self.deleteLater()
+
+    @Slot(str)
+    def deliver_error(self,message):
+        try:self.failed(message)
+        finally:self.deleteLater()
 
 
 class Job(QRunnable):
     def __init__(self, function, done, error):
         super().__init__()
         self.function = function
-        self.signals = JobSignals()
-        self.signals.done.connect(done)
-        self.signals.error.connect(error)
+        self.signals = JobSignals(done,error)
 
     def run(self):
         try:
@@ -95,7 +109,7 @@ class Advanced(QDialog):
         self.checks = {}
         for key, label in [('auto_sync','1시간마다 자동 동기화'),('compact_emojis','작은 창에서만 이모지로 표시'),
                            ('hour_reminders','시작 1시간 전 시스템 알림'),('all_day_reminders','종일 일정은 오전 9시 기준으로 알림'),
-                           ('daily_summary','매일 일정 요약 시스템 알림'),('desktop','바탕화면에 붙이기'),('startup','로그인 시 자동 실행')]:
+                           ('daily_summary','매일 일정 요약 시스템 알림'),('update_notifications','새 버전 업데이트 알림'),('desktop','바탕화면에 붙이기'),('startup','로그인 시 자동 실행')]:
             checkbox = QCheckBox(label); checkbox.setChecked(draft[key]); self.checks[key] = checkbox
             form.addRow(checkbox)
         self.summary = QLineEdit(draft['summary_time']); self.summary.setPlaceholderText('00:00')
@@ -108,6 +122,7 @@ class Advanced(QDialog):
         notice.setWordWrap(True); form.addRow(notice)
         self.codex = QCheckBox('적용 후 Codex · Dot 설정 열기'); form.addRow(self.codex)
         main=getattr(owner,'owner',owner)
+        check=QPushButton('지금 확인'); check.clicked.connect(lambda:main.updater.open(self)); form.addRow('업데이트',check)
         if main.notifications:
             test=QPushButton('시스템 알림 테스트 · 가상 예시')
             test.clicked.connect(lambda:main.notifications.send(dict(id='test-'+uuid.uuid4().hex,title='캘린더 알림 테스트',body='가상 예시입니다. 실제 일정은 변경하지 않습니다.',date=now().strftime('%Y-%m-%d')),lambda success:None))
@@ -376,7 +391,7 @@ class DayDetails(QDialog):
 
 class CalendarWindow(QWidget):
     notified = Signal(object, bool)
-    notification_clicked = Signal(str)
+    notification_clicked = Signal(object)
     def __init__(self, store, demo=False):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.store = store; self.demo = demo; self.month = now().strftime('%Y-%m')
@@ -401,9 +416,11 @@ class CalendarWindow(QWidget):
         if not demo: self.tray.show()
         self.notifications = platform_mac.Notifications(lambda title,body:self.tray.showMessage(title,body)) if not demo else None
         self.notified.connect(self.notification_done)
-        self.notification_clicked.connect(lambda day:self.detail.set_day(day) if day_valid(day) else self.today())
+        self.notification_clicked.connect(self.open_notification)
         if self.notifications: self.notifications.install_click_handler(self.notification_clicked.emit)
         self.alert_queue = []; self.sending = None; self.last_alert = -100.0
+        from updates import controller
+        self.updater=controller(self,demo)
         self.timer = QTimer(self); self.timer.timeout.connect(self.tick)
         self.geometry_timer = QTimer(self); self.geometry_timer.setSingleShot(True); self.geometry_timer.timeout.connect(self.save_geometry)
         QShortcut(QKeySequence('F5'),self,activated=self.refresh)
@@ -426,13 +443,14 @@ class CalendarWindow(QWidget):
         self.tick()
 
     def configure(self):
+        self.updater.configure()
         if not self.store.options['auto_sync']: self.pending=[p for p in self.pending if not p[1]]
         self.setWindowOpacity(self.store.options['opacity']/100)
         self.pin_action.setChecked(self.store.options['desktop'])
         if not self.demo:
             try: platform_mac.attach_desktop(self,self.store.options['desktop'])
             except Exception as error: self.status='바탕화면 연결: '+str(error)
-            if self.store.options['daily_summary'] or self.store.options['hour_reminders']: self.notifications.authorize()
+            if self.store.options['daily_summary'] or self.store.options['hour_reminders'] or self.store.options['update_notifications']: self.notifications.authorize()
         self.update()
 
     def toggle_pin(self,checked):
@@ -493,14 +511,25 @@ class CalendarWindow(QWidget):
         if self.sending: queued.add(self.sending['id'])
         for alert in self.store.notifications(at):
             if alert['id'] not in queued: self.alert_queue.append(alert); queued.add(alert['id'])
+        self.updater.tick()
         if self.alert_queue and not self.sending and time.monotonic()-self.last_alert>=20:
             alert=self.alert_queue.pop(0); self.sending=alert; self.last_alert=time.monotonic()
             self.notifications.send(alert,lambda success:self.notified.emit(alert,success))
         self.store.save()
 
+    def open_notification(self,target):
+        from updates import valid_download
+        if isinstance(target,dict) and valid_download(target.get('url','')):
+            QDesktopServices.openUrl(QUrl(target['url'])); return
+        day=target.get('date','') if isinstance(target,dict) else target
+        if day_valid(day): self.detail.set_day(day)
+        else: self.today()
+
     def notification_done(self,alert,success):
         self.sending=None
-        if success: self.store.acknowledge(alert)
+        if success:
+            if alert.get('kind')=='update': self.updater.state.acknowledge(alert)
+            else: self.store.acknowledge(alert)
         else: self.status='시스템 설정에서 위젯의 알림 허용 여부를 확인하세요.'; self.update()
 
     def move_month(self,amount):

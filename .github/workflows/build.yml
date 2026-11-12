@@ -22,6 +22,8 @@ jobs:
         run: python tests/run_self_checks.py
       - name: Check MCP protocol and tool schemas
         run: python tests/run_mcp_checks.py
+      - name: Check update selection and native settings
+        run: python tests/run_update_checks.py
       - name: Package portable application
         shell: pwsh
         run: ./package.ps1

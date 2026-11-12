@@ -22,7 +22,7 @@ namespace TeamCalendar
         readonly ComboBox calendar, fontSize;
         readonly TextBox email, nickname, summaryTime;
         readonly ColorPalette palette;
-        readonly CheckBox reminder, allDay, autoSync, compact, summary, desktop, startup;
+        readonly CheckBox reminder, allDay, autoSync, compact, summary, desktop, startup, updateNotifications;
         readonly TrackBar opacity;
         readonly Label message;
         CalendarSource selected;
@@ -78,7 +78,9 @@ namespace TeamCalendar
             fontSize.SelectedItem = draft.Appearance.FontSize; if (fontSize.SelectedIndex < 0) fontSize.SelectedIndex = 2; Controls.Add(fontSize);
             desktop = Check("바탕화면에 붙이기", 389, 472, 265, draft.Appearance.Desktop);
             startup = Check("윈도우 로그인 시 자동 실행", 22, 522, 390, draft.Startup);
-            message = Caption("돌아간 뒤 ‘적용’을 눌러야 변경 사항이 저장됩니다.", 22, 567, 646); message.Height = 50;
+            updateNotifications = Check("새 버전 업데이트 알림", 22, 558, 315, draft.Work.updateNotifications);
+            Action("지금 확인", 350, 556, 220, delegate { UpdateRuntime.CheckNow(this); });
+            message = Caption("돌아간 뒤 ‘적용’을 눌러야 변경 사항이 저장됩니다.", 22, 602, 646); message.Height = 42;
             Action("적용 후 Codex · Dot 설정", 22, 653, 255, delegate { draft.OpenCodex = true; message.Text = "최종 적용을 마치면 Codex · Dot 설정이 열립니다."; });
             Action("취소", 424, 653, 115, delegate { Close(); });
             Action("돌아가기", 553, 653, 115, delegate { ReturnToSettings(); });
@@ -107,6 +109,7 @@ namespace TeamCalendar
             else draft.Work.googleUser = email.Text.Trim();
             draft.Work.remindersEnabled = reminder.Checked; draft.Work.allDayReminders = allDay.Checked;
             draft.Work.autoSyncEnabled = autoSync.Checked; draft.Work.compactEmojis = compact.Checked;
+            draft.Work.updateNotifications = updateNotifications.Checked;
             draft.Work.dailySummaryEnabled = summary.Checked; draft.Work.SetDailySummaryTime(summaryTime.Text.Trim());
             draft.Appearance.Opacity = opacity.Value; draft.Appearance.FontSize = Convert.ToInt32(fontSize.SelectedItem); draft.Appearance.Desktop = desktop.Checked;
             draft.Startup = startup.Checked; parent.MergeAdvanced(draft);
