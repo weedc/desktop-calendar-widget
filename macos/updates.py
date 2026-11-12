@@ -141,7 +141,7 @@ def controller(window,demo=False):
             self.dialog.show(); self.check(True)
         def tick(self):
             self.configure()
-            if not self.demo and window.store.options['setup_completed']: self.check()
+            if not self.demo: self.check()
             result=self.state.pending
             if result:
                 self.state.pending=None

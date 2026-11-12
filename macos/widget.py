@@ -423,7 +423,7 @@ class CalendarWindow(QWidget):
         if not self.demo:
             try: platform_mac.attach_desktop(self,self.store.options['desktop'])
             except Exception as error: self.status='바탕화면 연결: '+str(error)
-            if self.store.options['daily_summary'] or self.store.options['hour_reminders']: self.notifications.authorize()
+            if self.store.options['daily_summary'] or self.store.options['hour_reminders'] or self.store.options['update_notifications']: self.notifications.authorize()
         self.update()
 
     def toggle_pin(self,checked):

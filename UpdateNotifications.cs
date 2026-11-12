@@ -88,7 +88,7 @@ namespace TeamCalendar
                 lastUpdateEnabled = features.updateNotifications; updateGeneration++; pendingUpdate = null;
                 if (lastUpdateEnabled) updateAttempt = DateTime.MinValue;
             }
-            if (features.setupCompleted && !checkingUpdates && UpdatePolicy.Due(features.updateNotifications, updateAttempt, DateTime.UtcNow)) StartUpdateCheck(null);
+            if (!checkingUpdates && UpdatePolicy.Due(features.updateNotifications, updateAttempt, DateTime.UtcNow)) StartUpdateCheck(null);
             if (pendingUpdate != null && features.updateNotifications && DailySummaryPolicy.CanNotify(lastSystemNotice, DateTimeOffset.Now))
             {
                 var result = pendingUpdate; pendingUpdate = null;
