@@ -8,6 +8,8 @@ namespace TeamCalendar
         static void Check(bool value, string name, List<string> checks) { if (!value) throw new InvalidOperationException(name); checks.Add(name); }
         public static void Run(List<string> checks)
         {
+            var cold = new ReaderLifecycle();
+            Check(!cold.BeginInitial(false) && !cold.BeginInitial(false) && cold.Phase == "new" && cold.BeginInitial(true), "cold refresh cannot authorize a first Chrome window; explicit connection can", checks);
             var session = new ReaderLifecycle();
             Check(session.BeginInitial() && !session.BeginInitial(), "only the first connection authorizes creation of a Chrome reader", checks);
             session.Connected(); session.RequireExisting(true);

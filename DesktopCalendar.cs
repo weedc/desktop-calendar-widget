@@ -55,6 +55,7 @@ namespace TeamCalendar
         static void Main(string[] args)
         {
             Directory.CreateDirectory(DataDir);
+            if (args.Contains("--resize-test")) { OpenStdio(); try { Console.WriteLine(Json.Serialize(ResizeChecks.Run())); } catch (Exception e) { Console.WriteLine(Json.Serialize(new { error = e.ToString() })); Environment.ExitCode = 1; } return; }
             if (args.Contains("--updates-test")) { OpenStdio(); try { Console.WriteLine(Json.Serialize(UpdateChecks.Run(args.Contains("--live")))); } catch (Exception e) { Console.WriteLine(Json.Serialize(new { error = e.Message })); Environment.ExitCode = 1; } return; }
             if (args.Contains("--self-test")) { OpenStdio(); try { Console.WriteLine(Json.Serialize(SelfChecks.Run())); } catch (Exception e) { Console.WriteLine(Json.Serialize(new { error = e.Message })); Environment.ExitCode = 1; } return; }
             if (args.Contains("--mcp")) { Mcp.Run(); return; }
@@ -117,10 +118,10 @@ namespace TeamCalendar
         readonly ChromeReaderWindow connection;
         public CalendarReader(CalendarSource source) { Source = source; connection = new ChromeReaderWindow(source); }
         public IntPtr Window { get { return connection.Window; } }
-        public MonthData Read(DateTime month, bool reload)
+        public MonthData Read(DateTime month, bool reload, bool allowInitialConnection = false)
         {
             month = new DateTime(month.Year, month.Month, 1);
-            var result = Parse(connection.Snapshot(month, reload), month, Source);
+            var result = Parse(connection.Snapshot(month, reload, allowInitialConnection), month, Source);
             App.Log("Existing Chrome read month=" + result.month + ", day occurrences=" + result.events.Count);
             return result;
         }
@@ -180,17 +181,16 @@ namespace TeamCalendar
         readonly Dictionary<string, MonthData> cache = new Dictionary<string, MonthData>();
         readonly List<EventHit> hits = new List<EventHit>();
         readonly ToolTip tooltip = new ToolTip { InitialDelay = 300, AutoPopDelay = 15000 };
-        readonly Panel toolbar;
+        readonly Panel toolbar, monthNavigation;
+        readonly Button previousMonth, nextMonth;
         readonly Label monthLabel, nameLabel;
         readonly ContextMenuStrip menu;
         readonly NotifyIcon tray;
         readonly System.Windows.Forms.Timer pulse;
         readonly ToolStripMenuItem desktopMenu;
         DateTime month = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        bool pinned, positioning, loading, shuttingDown, dragging, resizing;
+        bool pinned, positioning, loading, shuttingDown, dragging;
         Point mouseStart, formStart;
-        Point resizeStart;
-        Size resizeSize;
         Point initialPosition;
         IntPtr desktopHost;
         DateTime lastSync = DateTime.MinValue;
@@ -216,6 +216,7 @@ namespace TeamCalendar
             menu = new ContextMenuStrip();
             menu.Items.Add("구글 캘린더 열기", null, delegate { App.Open(App.CalendarUrl); });
             menu.Items.Add("일정 새로고침", null, delegate { RefreshMonth(true); });
+            menu.Items.Add("이번 달로 이동", null, delegate { SetMonth(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)); });
             menu.Items.Add(new ToolStripSeparator());
             desktopMenu = new ToolStripMenuItem("바탕화면에 붙이기") { Checked = settings.Desktop };
             desktopMenu.Click += delegate { Pin(!pinned); Save(); }; menu.Items.Add(desktopMenu);
@@ -250,28 +251,24 @@ namespace TeamCalendar
 
             toolbar = new Panel { Dock = DockStyle.Top, Height = HeaderHeight, BackColor = Color.FromArgb(24, 46, 60) };
             nameLabel = new Label { Text = "▦  " + App.Name, AutoSize = false, Width = 250, Height = HeaderHeight, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), Font = new Font("맑은 고딕", 9.5F), Cursor = Cursors.SizeAll, AccessibleName = "위젯 이동" };
-            monthLabel = new Label { TextAlign = ContentAlignment.MiddleCenter, Font = new Font("맑은 고딕", 12, FontStyle.Bold), Height = HeaderHeight, Cursor = Cursors.Hand, AccessibleName = "표시 중인 달" };
+            monthLabel = new Label { TextAlign = ContentAlignment.MiddleCenter, Font = new Font("맑은 고딕", 12, FontStyle.Bold), Cursor = Cursors.Hand, AccessibleName = "표시 중인 달 · 클릭해서 이동" };
             monthLabel.Click += delegate { PickMonth(); };
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 262, Height = HeaderHeight, WrapContents = false, FlowDirection = FlowDirection.LeftToRight };
-            buttons.Controls.Add(MakeButton("‹", "이전 달", 32, delegate { MoveMonth(-1); }));
-            buttons.Controls.Add(MakeButton("오늘", "오늘", 49, delegate { SetMonth(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)); }));
-            buttons.Controls.Add(MakeButton("›", "다음 달", 32, delegate { MoveMonth(1); }));
+            monthNavigation = new Panel { Height = HeaderHeight, BackColor = toolbar.BackColor };
+            previousMonth = MakeButton("‹", "이전 달", 30, delegate { MoveMonth(-1); });
+            nextMonth = MakeButton("›", "다음 달", 30, delegate { MoveMonth(1); });
+            monthNavigation.Controls.Add(previousMonth); monthNavigation.Controls.Add(monthLabel); monthNavigation.Controls.Add(nextMonth);
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 137, Height = HeaderHeight, WrapContents = false, FlowDirection = FlowDirection.LeftToRight };
             buttons.Controls.Add(MakeButton("↻", "새로고침", 32, delegate { RefreshMonth(true); }));
             buttons.Controls.Add(MakeButton("↗", "구글 캘린더 열기", 32, delegate { App.Open(App.CalendarUrl); }));
             buttons.Controls.Add(MakeButton("⋯", "위젯 설정", 32, delegate { ShowCalendarManager(); }));
             buttons.Controls.Add(MakeButton("─", "위젯 숨기기", 32, delegate { Hide(); }));
-            toolbar.Controls.Add(nameLabel); toolbar.Controls.Add(monthLabel); toolbar.Controls.Add(buttons); Controls.Add(toolbar);
+            toolbar.Controls.Add(nameLabel); toolbar.Controls.Add(monthNavigation); toolbar.Controls.Add(buttons); Controls.Add(toolbar);
             foreach (Control control in new Control[] { toolbar, nameLabel }) { control.MouseDown += DragStart; control.MouseMove += DragMove; control.MouseUp += DragEnd; }
-            Layout += delegate { monthLabel.Left = Math.Max(250, (Width - 250) / 2); monthLabel.Width = Math.Max(130, Math.Min(220, Width - 530)); };
+            Layout += delegate { LayoutMonthNavigation(); };
             ResizeEnd += delegate { Save(); };
             KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Left) MoveMonth(-1); else if (e.KeyCode == Keys.Right) MoveMonth(1); else if (e.KeyCode == Keys.Home) SetMonth(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)); else if (e.KeyCode == Keys.F5) RefreshMonth(true); };
             MouseMove += HoverEvent; MouseDoubleClick += OpenDay;
-            MouseDown += delegate(object s, MouseEventArgs e)
-            {
-                if (e.Button == MouseButtons.Left && e.X >= Width - 20 && e.Y >= Height - 20)
-                { resizing = true; resizeStart = Cursor.Position; resizeSize = Size; Capture = true; }
-            };
-            MouseUp += delegate { if (resizing) { resizing = false; Capture = false; Save(); } };
+            CalendarResize.Attach(this, delegate { Save(); if (pinned) Win.RepaintDesktop(); });
             tray = new NotifyIcon { Icon = Icon, Text = "팀 캘린더", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += delegate { ShowWidget(); };
             pulse = new System.Windows.Forms.Timer { Interval = 500 };
@@ -282,7 +279,7 @@ namespace TeamCalendar
                 else Pin(settings.Desktop);
                 Location = initialPosition; SetOpacity(settings.Opacity); UpdateMonthLabel();
                 if (pinned) Win.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0013);
-                App.Log("Widget HWND=" + Handle.ToInt64()); Bridge.Start(this); pulse.Start(); LoadCachedMonth(month); if (features.autoSyncEnabled) RefreshMonth(false); else { syncMessage = "저장된 일정 · ↻ 버튼으로 새로고침"; Invalidate(); }
+                App.Log("Widget HWND=" + Handle.ToInt64()); Bridge.Start(this); pulse.Start(); LoadCachedMonth(month); if (features.autoSyncEnabled) RefreshMonth(false, null, true); else { syncMessage = "저장된 일정 · 설정에서 Google 연결 후 새로고침"; Invalidate(); }
                 if (!features.setupCompleted) BeginInvoke((Action)delegate { ShowCalendarManager(true); });
                 Win.RepaintDesktop();
             };
@@ -313,7 +310,18 @@ namespace TeamCalendar
             var b = new Button { Text = text, AccessibleName = name, Width = width, Height = 30, Margin = new Padding(1, 4, 0, 0), FlatStyle = FlatStyle.Flat, ForeColor = Color.FromArgb(232, 245, 251), BackColor = Color.FromArgb(24, 46, 60), Cursor = Cursors.Hand, Font = new Font("맑은 고딕", 10) };
             b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Color.FromArgb(54, 87, 105); b.Click += handler; return b;
         }
-        void UpdateMonthLabel() { monthLabel.Text = month.ToString("yyyy년 M월"); Invalidate(); }
+        void LayoutMonthNavigation()
+        {
+            if (monthNavigation == null || monthLabel == null) return;
+            Size text = TextRenderer.MeasureText(monthLabel.Text, monthLabel.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            monthLabel.Size = new Size(text.Width + 8, Math.Min(HeaderHeight - 8, text.Height + 4));
+            monthLabel.Location = new Point(34, (HeaderHeight - monthLabel.Height) / 2);
+            previousMonth.Location = new Point(0, 4); nextMonth.Location = new Point(monthLabel.Right + 4, 4);
+            monthNavigation.Size = new Size(nextMonth.Right, HeaderHeight);
+            monthNavigation.Location = new Point((ClientSize.Width - monthNavigation.Width) / 2, 0);
+            nameLabel.Width = Math.Min(250, Math.Max(100, monthNavigation.Left - 8));
+        }
+        void UpdateMonthLabel() { monthLabel.Text = month.ToString("yyyy년 M월"); LayoutMonthNavigation(); Invalidate(); }
         void MoveMonth(int amount) { SetMonth(month.AddMonths(amount)); }
         void SetMonth(DateTime date) { month = new DateTime(date.Year, date.Month, 1); LoadCachedMonth(month); UpdateMonthLabel(); RefreshMonth(false); }
         void PickMonth()
@@ -325,7 +333,7 @@ namespace TeamCalendar
                 if (dialog.ShowDialog() == DialogResult.OK) SetMonth(picker.Value);
             }
         }
-        void RefreshMonth(bool force, DateTime? backgroundMonth = null)
+        void RefreshMonth(bool force, DateTime? backgroundMonth = null, bool allowInitialConnection = false)
         {
             if (shuttingDown) return;
             DateTime requested = backgroundMonth.HasValue ? backgroundMonth.Value : month;
@@ -335,7 +343,7 @@ namespace TeamCalendar
             Task.Run(delegate
             {
                 MonthData data = null; string error = null;
-                try { data = reader.Read(requested, force); } catch (Exception e) { error = e.Message; App.Log("Sync failed: " + e.GetType().Name + ": " + e.Message); }
+                try { data = reader.Read(requested, force, allowInitialConnection); } catch (Exception e) { error = e.Message; App.Log("Sync failed: " + e.GetType().Name + ": " + e.Message); }
                 if (shuttingDown) return;
                 BeginInvoke((Action)delegate
                 {
@@ -412,15 +420,10 @@ namespace TeamCalendar
         }
         void HoverEvent(object sender, MouseEventArgs e)
         {
-            if (resizing)
-            {
-                Size = new Size(Math.Max(MinimumSize.Width, resizeSize.Width + Cursor.Position.X - resizeStart.X), Math.Max(MinimumSize.Height, resizeSize.Height + Cursor.Position.Y - resizeStart.Y));
-                return;
-            }
             var hit = hits.FirstOrDefault(h => h.bounds.Contains(e.Location));
             string text = hit == null ? "" : EmojiData.Icons(EventEmoji(hit.item)) + " " + hit.item.title + "\n" + hit.day.ToString("M월 d일") + " · " + hit.item.time + (hit.item.location == "" ? "" : "\n" + hit.item.location);
             if (hover != text) { hover = text; tooltip.SetToolTip(this, text); }
-            Cursor = e.X >= Width - 20 && e.Y >= Height - 20 ? Cursors.SizeNWSE : hit == null ? Cursors.Default : Cursors.Hand;
+            Cursor = hit == null ? Cursors.Default : Cursors.Hand;
         }
         void OpenDay(object sender, MouseEventArgs e)
         {
@@ -467,18 +470,6 @@ namespace TeamCalendar
         void DragStart(object s, MouseEventArgs e) { if (e.Button != MouseButtons.Left) return; dragging = true; mouseStart = Cursor.Position; formStart = Location; ((Control)s).Capture = true; }
         void DragMove(object s, MouseEventArgs e) { if (dragging) Location = new Point(formStart.X + Cursor.Position.X - mouseStart.X, formStart.Y + Cursor.Position.Y - mouseStart.Y); }
         void DragEnd(object s, MouseEventArgs e) { dragging = false; ((Control)s).Capture = false; Save(); }
-        protected override void WndProc(ref Message m)
-        {
-            base.WndProc(ref m);
-            if (m.Msg == 0x84 && m.Result == (IntPtr)1)
-            {
-                Point p = PointToClient(new Point((short)(m.LParam.ToInt64() & 0xffff), (short)((m.LParam.ToInt64() >> 16) & 0xffff)));
-                bool left = p.X < 6, right = p.X > Width - 8, top = p.Y < 3, bottom = p.Y > Height - 8;
-                if (p.X >= Width - 20 && p.Y >= Height - 20) { m.Result = (IntPtr)1; return; }
-                if (bottom && right) m.Result = (IntPtr)17; else if (bottom && left) m.Result = (IntPtr)16;
-                else if (left) m.Result = (IntPtr)10; else if (right) m.Result = (IntPtr)11; else if (bottom) m.Result = (IntPtr)15; else if (top) m.Result = (IntPtr)12;
-            }
-        }
         public object Command(Dictionary<string, object> args)
         {
             object featureResult; if (TryFeatureCommand(args, out featureResult)) return featureResult;

@@ -1,4 +1,4 @@
-"""Public release checks, independent of Google synchronization. Never installs code."""
+"""Public release checks and explicit user-initiated updates, independent of Google sync."""
 import json
 import platform
 import re
@@ -41,7 +41,7 @@ def select_release(releases,current,target):
             match=re.fullmatch(r'DesktopCalendarWidget-v(\d+\.\d+\.\d+(?:\.\d+)?)-'+re.escape(target)+r'\.zip',name)
             candidate=version(match[1]) if match else None
             if candidate and candidate>newest and valid_download(asset.get('browser_download_url',''),name):
-                newest=candidate; best={'version':match[1],'url':asset['browser_download_url']}
+                newest=candidate; best={'version':match[1],'url':asset['browser_download_url'],'digest':asset.get('digest','')}
     return best
 
 
@@ -95,15 +95,19 @@ class UpdateState:
 def controller(window,demo=False):
     from PySide6.QtCore import QObject,QThreadPool,Slot
     from PySide6.QtWidgets import QDialog,QVBoxLayout,QLabel,QHBoxLayout,QPushButton
-    from PySide6.QtGui import QDesktopServices
-    from PySide6.QtCore import QUrl
     from core import VERSION
     from widget import Job
+    class InstallDialog(QDialog):
+        def reject(self):
+            if not self.property('installing'): super().reject()
+        def closeEvent(self,event):
+            if self.property('installing'): event.ignore()
+            else: super().closeEvent(event)
     class Controller(QObject):
         def __init__(self):
             super().__init__(window)
             self.state=UpdateState(window.store,VERSION,'mac-arm64' if platform.machine().lower() in ('arm64','aarch64') else 'mac-x86_64')
-            self.pool=QThreadPool(self); self.pool.setMaxThreadCount(1); self.busy=False; self.dialog=None; self.demo=demo
+            self.pool=QThreadPool(self); self.pool.setMaxThreadCount(1); self.busy=False; self.installing=False; self.dialog=None; self.demo=demo
             self.reader=lambda:fetch(VERSION)
         def configure(self):
             self.state.configure()
@@ -111,7 +115,7 @@ def controller(window,demo=False):
                 window.alert_queue[:]=[a for a in window.alert_queue if a.get('kind')!='update']
         def check(self,manual=False):
             self.configure()
-            if self.busy:return
+            if self.busy or self.installing:return
             generation=self.state.begin(manual)
             if generation is None:return
             self.busy=True; self.generation=generation
@@ -126,25 +130,46 @@ def controller(window,demo=False):
         def failed(self,message):
             self.busy=False; self.render(None,True)
         def render(self,result,failed):
-            if self.dialog and self.dialog.isVisible():
+            if self.dialog and self.dialog.isVisible() and not self.installing:
                 self.message.setText('업데이트를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' if failed else '최신 버전을 사용하고 있습니다.' if not result else '새 버전 '+result['version']+'을 사용할 수 있습니다.')
                 self.result=result; self.download.setEnabled(bool(result))
         def open(self,owner):
             if self.dialog and self.dialog.isVisible(): self.dialog.raise_(); return
-            self.dialog=QDialog(owner); self.dialog.setWindowTitle('업데이트 확인'); self.dialog.resize(430,200)
+            self.result=None
+            self.dialog=InstallDialog(owner); self.dialog.setWindowTitle('업데이트 확인'); self.dialog.resize(430,200)
             layout=QVBoxLayout(self.dialog); layout.addWidget(QLabel('현재 버전  '+VERSION))
             self.message=QLabel('새 버전을 확인하고 있습니다…'); self.message.setWordWrap(True); layout.addWidget(self.message)
             row=QHBoxLayout(); layout.addLayout(row); row.addStretch()
-            self.download=QPushButton('다운로드'); self.download.setEnabled(False); row.addWidget(self.download)
-            self.download.clicked.connect(lambda:QDesktopServices.openUrl(QUrl(self.result['url'])) if self.result and valid_download(self.result['url']) else None)
+            self.download=QPushButton('업데이트하기'); self.download.setEnabled(False); row.addWidget(self.download)
+            self.download.clicked.connect(self.install)
             close=QPushButton('닫기'); close.clicked.connect(self.dialog.close); row.addWidget(close)
             self.dialog.show(); self.check(True)
+        def install(self):
+            if self.installing or not self.result:return
+            from installer import prepare
+            self.installing=True; self.dialog.setProperty('installing',True); self.download.setEnabled(False)
+            self.message.setText('업데이트를 다운로드하고 있습니다…\n완료되면 위젯을 다시 시작합니다.')
+            self.job=Job(lambda:prepare(self.result,self.state.target),self.installed,self.install_failed)
+            self.pool.start(self.job)
+        @Slot(object)
+        def installed(self,plan):
+            from installer import handoff
+            try: handoff(plan)
+            except Exception as error: self.install_failed(str(error)); return
+            window.quit()
+        @Slot(str)
+        def install_failed(self,message):
+            self.installing=False
+            if self.dialog:
+                self.dialog.setProperty('installing',False)
+                self.message.setText('업데이트하지 못했습니다. '+message); self.download.setEnabled(bool(self.result))
         def tick(self):
+            if self.installing:return
             self.configure()
             if not self.demo: self.check()
             result=self.state.pending
             if result:
                 self.state.pending=None
                 if not any(a.get('kind')=='update' for a in window.alert_queue) and not (window.sending and window.sending.get('kind')=='update'):
-                    window.alert_queue.append(dict(id='update-'+result['version'],kind='update',version=result['version'],url=result['url'],date='',title='캘린더 업데이트 · '+result['version'],body='새 버전이 있습니다. 알림을 클릭해 다운로드하세요.'))
+                    window.alert_queue.append(dict(id='update-'+result['version'],kind='update',version=result['version'],url=result['url'],date='',title='캘린더 업데이트 · '+result['version'],body='새 버전이 있습니다. 알림을 클릭해 업데이트하세요.'))
     return Controller()

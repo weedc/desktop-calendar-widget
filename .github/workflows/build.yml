@@ -24,6 +24,10 @@ jobs:
         run: python tests/run_mcp_checks.py
       - name: Check update selection and native settings
         run: python tests/run_update_checks.py
+      - name: Check update restart helper with disposable applications
+        run: python tests/run_install_checks.py
+      - name: Check eight resize handles in normal and parented windows
+        run: python tests/run_resize_checks.py
       - name: Package portable application
         shell: pwsh
         run: ./package.ps1

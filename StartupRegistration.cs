@@ -10,6 +10,17 @@ namespace TeamCalendar
     static class StartupRegistration
     {
         const string RunPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run", Name = "DesktopCalendarWidget";
+        const string PreferencePath = "Software\\DesktopCalendarWidget";
+        public static bool DefaultEnabled(bool existingSetup, bool registered, bool? savedChoice)
+        { return savedChoice ?? (registered || !existingSetup); }
+        public static bool ForSetup(bool existingSetup)
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(PreferencePath))
+            {
+                object value = key == null ? null : key.GetValue("AutoStart");
+                return DefaultEnabled(existingSetup, Enabled(), value == null ? (bool?)null : Convert.ToInt32(value) != 0);
+            }
+        }
         public static bool Owned(string value, string directory)
         {
             try
@@ -33,6 +44,7 @@ namespace TeamCalendar
                 foreach (string name in key.GetValueNames().Where(n => Owned(Convert.ToString(key.GetValue(n)), directory)).ToArray()) key.DeleteValue(name, false);
                 if (enabled) key.SetValue(Name, "\"" + Application.ExecutablePath + "\"");
             }
+            using (var key = Registry.CurrentUser.CreateSubKey(PreferencePath)) key.SetValue("AutoStart", enabled ? 1 : 0, RegistryValueKind.DWord);
         }
     }
 }

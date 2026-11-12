@@ -255,7 +255,7 @@ class Settings(QDialog):
             if self.connection_changed: self.owner.google_reader.reset()
             self.owner.configure()
             self.accept()
-            self.owner.refresh()
+            self.owner.refresh(allow_initial=True)
             if self.open_codex: self.owner.codex_dialog()
         except Exception as error:
             self.status.setText(str(error))
@@ -384,16 +384,26 @@ class CalendarWindow(QWidget):
         self.setGeometry(*store.data['geometry']); self.pool = QThreadPool(self); self.pool.setMaxThreadCount(1)
         self.busy = False; self.pending = []; self.last_attempt = 0.0; self.month_attempts={}; self.status = '저장된 일정'; self.hits = []
         self.google_reader = GoogleReader()
-        self.detail = DayDetails(self); self.settings_window = None; self.grip = QSizeGrip(self)
-        self.grip.setStyleSheet('background:transparent;')
+        self.detail = DayDetails(self); self.settings_window = None
         self.header = QWidget(self); self.header.setStyleSheet('background:transparent;')
         row = QHBoxLayout(self.header); row.setContentsMargins(0,0,0,0); row.setSpacing(0)
-        for title, function in [('‹',lambda:self.move_month(-1)),('오늘',self.today),('›',lambda:self.move_month(1)),('↻',self.refresh),('↗',self.open_google),('⋯',self.settings),('─',self.hide)]:
+        for title, function in [('↻',self.refresh),('↗',self.open_google),('⋯',self.settings),('─',self.hide)]:
             control=button(title,function,row); control.setStyleSheet('QPushButton {background:transparent; padding:4px 7px; border:0; border-radius:10px;} QPushButton:hover {background:#365563;}')
+        self.month_navigation=QWidget(self); self.month_navigation.setStyleSheet('background:transparent;')
+        nav=QHBoxLayout(self.month_navigation); nav.setContentsMargins(0,0,0,0); nav.setSpacing(4)
+        self.previous_month=button('‹',lambda:self.move_month(-1),nav)
+        self.month_button=button('',self.pick_month,nav)
+        self.next_month=button('›',lambda:self.move_month(1),nav)
+        for control in (self.previous_month,self.month_button,self.next_month):
+            control.setCursor(Qt.CursorShape.PointingHandCursor)
+            control.setStyleSheet('QPushButton {background:transparent; padding:2px 4px; border:0; border-radius:7px;} QPushButton:hover {background:#365563;}')
+        self.month_button.setFont(QFont('Arial',12,QFont.Weight.Bold))
+        self.month_button.setAccessibleName('표시 중인 달 · 클릭해서 이동')
+        self.layout_month_navigation()
         self.app_icon=self.icon(); self.setWindowIcon(self.app_icon)
         self.tray = QSystemTrayIcon(self.app_icon,self)
         menu = QMenu()
-        for title, function in [('보이기 / 숨기기',self.toggle),('새로고침',self.refresh),('설정',self.settings),('Codex · Dot 연동',self.codex_dialog)]: menu.addAction(title,function)
+        for title, function in [('보이기 / 숨기기',self.toggle),('이번 달로 이동',self.today),('새로고침',self.refresh),('설정',self.settings),('Codex · Dot 연동',self.codex_dialog)]: menu.addAction(title,function)
         self.pin_action = menu.addAction('바탕화면에 붙이기'); self.pin_action.setCheckable(True); self.pin_action.triggered.connect(self.toggle_pin)
         menu.addSeparator(); menu.addAction('위젯 종료',self.quit)
         self.tray.setContextMenu(menu); self.tray.setToolTip('팀 캘린더 위젯'); self.tray.activated.connect(lambda reason:self.toggle() if reason==QSystemTrayIcon.ActivationReason.Trigger else None)
@@ -409,6 +419,9 @@ class CalendarWindow(QWidget):
         self.geometry_timer = QTimer(self); self.geometry_timer.setSingleShot(True); self.geometry_timer.timeout.connect(self.save_geometry)
         QShortcut(QKeySequence('F5'),self,activated=self.refresh)
         QShortcut(QKeySequence('Ctrl+R'),self,activated=self.refresh)
+        QShortcut(QKeySequence('Home'),self,activated=self.today)
+        from resize import ResizeHandles
+        self.resize_handles = ResizeHandles(self)
         self.show(); self.configure()
         if not demo:
             self.timer.start(20000)
@@ -423,7 +436,7 @@ class CalendarWindow(QWidget):
 
     def start(self):
         if not self.store.options['setup_completed']: self.settings()
-        elif self.store.options['auto_sync']: self.refresh()
+        elif self.store.options['auto_sync']: self.refresh(allow_initial=True)
         self.tick()
 
     def configure(self):
@@ -451,16 +464,16 @@ class CalendarWindow(QWidget):
         if self.settings_window and self.settings_window.isVisible(): self.settings_window.raise_(); return
         self.settings_window=Settings(self); self.settings_window.show(); self.settings_window.raise_(); self.settings_window.activateWindow()
 
-    def refresh(self):
-        self.request_month(self.month)
+    def refresh(self,allow_initial=False):
+        self.request_month(self.month,allow_initial=allow_initial)
 
-    def request_month(self,month,automatic=False):
+    def request_month(self,month,automatic=False,allow_initial=False):
         if self.demo: return
         if automatic and not self.store.options['auto_sync']: return
         if not month_valid(month): raise ValueError('YYYY-MM 형식으로 입력하세요.')
         if self.busy:
             if not automatic: self.pending=[p for p in self.pending if p[1]]
-            self.pending=[p for p in self.pending if p[0]!=month]+[(month,automatic)]
+            self.pending=[p for p in self.pending if p[0]!=month]+[(month,automatic,allow_initial)]
             return
         sources=copy.deepcopy(self.store.sources()); email=self.store.options['account_email']
         if not any(s.get('enabled',True) for s in sources): self.status='표시할 캘린더가 없습니다'; self.update(); return
@@ -478,7 +491,7 @@ class CalendarWindow(QWidget):
         def failed(message):
             self.busy=False; self.status=message; self.update()
             if self.pending: self.request_month(*self.pending.pop(0))
-        self.pool.start(Job(lambda: self.google_reader.read_month(month,sources,email),finished,failed))
+        self.pool.start(Job(lambda: self.google_reader.read_month(month,sources,email,allow_initial=allow_initial),finished,failed))
 
     def tick(self):
         if self.demo: return
@@ -504,7 +517,7 @@ class CalendarWindow(QWidget):
     def open_notification(self,target):
         from updates import valid_download
         if isinstance(target,dict) and valid_download(target.get('url','')):
-            QDesktopServices.openUrl(QUrl(target['url'])); return
+            self.show_widget(); self.updater.open(self); return
         day=target.get('date','') if isinstance(target,dict) else target
         if day_valid(day): self.detail.set_day(day)
         else: self.today()
@@ -522,9 +535,20 @@ class CalendarWindow(QWidget):
 
     def set_month(self,month):
         if not month_valid(month): raise ValueError('YYYY-MM 형식으로 입력하세요.')
-        self.month=month; self.update(); self.request_month(month)
+        self.month=month; self.layout_month_navigation(); self.update(); self.request_month(month)
 
     def today(self): self.set_month(now().strftime('%Y-%m'))
+
+    def pick_month(self):
+        value,ok=QInputDialog.getText(self,'달 이동','YYYY-MM',text=self.month)
+        if ok and month_valid(value): self.set_month(value)
+
+    def layout_month_navigation(self):
+        self.month_button.setText(self.month[:4]+'년 '+str(int(self.month[5:]))+'월')
+        self.month_button.setFixedSize(self.month_button.sizeHint())
+        self.previous_month.setFixedSize(28,28); self.next_month.setFixedSize(28,28)
+        self.month_navigation.adjustSize()
+        self.month_navigation.move((self.width()-self.month_navigation.width())//2,4)
 
     def open_google(self):
         QDesktopServices.openUrl(QUrl('https://calendar.google.com/calendar/u/0/r/month/'+self.month.replace('-','/').lstrip('0')))
@@ -545,7 +569,9 @@ class CalendarWindow(QWidget):
         button('연동 해제',lambda:register(False),layout); button('닫기',dialog.accept,layout); dialog.show(); self.codex_window=dialog
 
     def resizeEvent(self,event):
-        self.header.setGeometry(self.width()-300,3,294,30); self.grip.setGeometry(self.width()-17,self.height()-17,17,17)
+        self.header.setGeometry(self.width()-160,3,154,30)
+        self.layout_month_navigation()
+        self.resize_handles.layout()
         if not self.demo: self.geometry_timer.start(500)
         super().resizeEvent(event)
 
@@ -571,7 +597,6 @@ class CalendarWindow(QWidget):
         title=' · '.join(s['name'] for s in self.store.sources() if s.get('enabled',True))
         p.drawPixmap(10,10,self.app_icon.pixmap(15,15))
         p.drawText(QRectF(32,0,min(250,self.width()/3),34),Qt.AlignmentFlag.AlignVCenter,p.fontMetrics().elidedText(title,Qt.TextElideMode.ElideRight,int(min(240,self.width()/3))))
-        p.setFont(QFont('Arial',12,QFont.Weight.Bold)); p.drawText(QRectF(self.width()/2-110,0,220,34),Qt.AlignmentFlag.AlignCenter,self.month[:4]+'년 '+str(int(self.month[5:]))+'월')
         days=days_for_month(self.month); rows=len(days)//7
         top=65; bottom=self.height()-26; cw=(self.width()-10)/7; ch=(bottom-top)/rows
         p.setFont(QFont('Arial',10)); names=['일요일','월요일','화요일','수요일','목요일','금요일','토요일']
@@ -639,9 +664,6 @@ class CalendarWindow(QWidget):
     def mouseDoubleClickEvent(self,event):
         day=self.date_at(event.position())
         if day: self.detail.set_day(day)
-        elif event.position().y()<35:
-            value,ok=QInputDialog.getText(self,'달 이동','YYYY-MM',text=self.month)
-            if ok and month_valid(value): self.set_month(value)
 
     def mouseMoveEvent(self,event):
         self.setToolTip(next((text for rect,text,day in self.hits if rect.contains(event.position())),''))

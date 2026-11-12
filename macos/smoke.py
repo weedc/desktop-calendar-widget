@@ -11,6 +11,33 @@ def check(app,window):
     try:
         store=window.store; window.month='2026-11'; window.resize(700,410); window.repaint()
         assert len(window.hits)>0
+        assert window.previous_month.parent() is window.month_navigation
+        assert window.next_month.parent() is window.month_navigation
+        assert window.month_button.width()<window.month_button.fontMetrics().horizontalAdvance(window.month_button.text())+20
+        assert not any(b.text()=='오늘' for b in window.header.findChildren(__import__('PySide6.QtWidgets',fromlist=['QPushButton']).QPushButton))
+        from unittest.mock import patch
+        with patch('widget.QInputDialog.getText',return_value=('2027-02',True)) as jump:
+            window.month_button.click(); assert window.month=='2027-02' and jump.call_count==1
+        window.set_month('2026-11')
+        # Send mouse events through every real handle without moving the user's pointer.
+        from PySide6.QtCore import QEvent,QPoint,QPointF,QRect
+        from PySide6.QtGui import QMouseEvent
+        from resize import calculate
+        original=QRect(window.geometry())
+        for handle in window.resize_handles.handles:
+            window.setGeometry(original); app.processEvents()
+            local=QPointF(handle.width()/2,handle.height()/2)
+            screen=QPointF(handle.mapToGlobal(local.toPoint())); delta=QPoint(31,23)
+            press=QMouseEvent(QEvent.Type.MouseButtonPress,local,screen,Qt.MouseButton.LeftButton,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+            app.sendEvent(handle,press)
+            screen+=QPointF(delta); at=QPointF(handle.mapFromGlobal(screen.toPoint()))
+            move=QMouseEvent(QEvent.Type.MouseMove,at,screen,Qt.MouseButton.NoButton,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+            app.sendEvent(handle,move)
+            app.sendEvent(handle,QMouseEvent(QEvent.Type.MouseButtonRelease,at,screen,Qt.MouseButton.LeftButton,Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier))
+            assert window.geometry()==calculate(original,handle.edges,delta,window.minimumSize()),str(handle.edges)
+        minimum=calculate(original,Qt.Edge.LeftEdge|Qt.Edge.TopEdge,QPoint(99999,99999),window.minimumSize())
+        assert minimum.size()==window.minimumSize() and minimum.bottomRight()==original.bottomRight()
+        window.setGeometry(original); app.processEvents()
         import os
         from pathlib import Path
         qa=os.environ.get('CALENDAR_WIDGET_QA_DIR')
@@ -63,6 +90,17 @@ def check(app,window):
         assert not window.updater.busy and window.updater.download.isEnabled(), (window.updater.busy,window.updater.message.text(),window.updater.dialog.isVisible(),window.updater.state.target)
         assert '99.0.0' in window.updater.message.text() and not store.options['update_notifications']
         assert window.updater.state.pending is None and not store.options['auto_sync']
+        assert window.updater.download.text()=='업데이트하기'
+        # The actual button calls the installer once; failure leaves the widget running.
+        from unittest.mock import patch
+        calls=[]
+        def failed_install(result,target): calls.append(target); raise ValueError('synthetic failure')
+        with patch('installer.prepare',failed_install):
+            window.updater.download.click(); window.updater.download.click()
+            deadline=time.monotonic()+3
+            while window.updater.installing and time.monotonic()<deadline: app.processEvents(); time.sleep(0.01)
+        assert calls==[window.updater.state.target] and not window.updater.installing
+        assert window.updater.download.isEnabled() and 'synthetic failure' in window.updater.message.text()
         window.updater.dialog.close(); advanced.reject(); window.updater.reader=original_reader
         import sys
         if sys.platform=='darwin':

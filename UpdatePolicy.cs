@@ -10,9 +10,9 @@ using System.Web.Script.Serialization;
 
 namespace TeamCalendar
 {
-    public sealed class ReleaseAsset { public string name, browser_download_url; }
+    public sealed class ReleaseAsset { public string name, browser_download_url, digest; }
     public sealed class PublicRelease { public bool draft, prerelease; public ReleaseAsset[] assets; }
-    public sealed class WidgetUpdate { public string version, url; }
+    public sealed class WidgetUpdate { public string version, url, digest; }
     static class UpdatePolicy
     {
         public const string Feed = "https://api.github.com/repos/weedc/desktop-calendar-widget/releases?per_page=100";
@@ -42,7 +42,7 @@ namespace TeamCalendar
                     var match = Regex.Match(asset.name, @"^DesktopCalendarWidget-v(\d+\.\d+\.\d+(?:\.\d+)?)-" + Regex.Escape(platform) + @"\.zip$", RegexOptions.CultureInvariant);
                     if (!match.Success || !ValidUrl(asset.browser_download_url, asset.name)) continue;
                     var candidate = ParseVersion(match.Groups[1].Value);
-                    if (candidate != null && candidate > newest) { newest = candidate; best = new WidgetUpdate { version = match.Groups[1].Value, url = asset.browser_download_url }; }
+                    if (candidate != null && candidate > newest) { newest = candidate; best = new WidgetUpdate { version = match.Groups[1].Value, url = asset.browser_download_url, digest = asset.digest }; }
                 }
             }
             return best;

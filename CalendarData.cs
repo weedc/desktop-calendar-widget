@@ -92,13 +92,13 @@ namespace TeamCalendar
             Dispose(); state = features;
             foreach (var source in state.ActiveCalendars().Where(s => s.enabled)) readers.Add(new CalendarReader(source));
         }
-        public MonthData Read(DateTime month, bool force)
+        public MonthData Read(DateTime month, bool force, bool allowInitialConnection = false)
         {
             var data = new MonthData { month = month.ToString("yyyy-MM"), syncedAt = DateTimeOffset.Now.ToString("o") };
             var failures = new List<string>();
             foreach (var reader in readers)
             {
-                try { data.events.AddRange(reader.Read(month, force).events); }
+                try { data.events.AddRange(reader.Read(month, force, allowInitialConnection).events); }
                 catch (Exception e) { failures.Add(reader.Source.name + ": " + e.Message); data.failedCalendars.Add(reader.Source.id); }
             }
             if (readers.Count > 0 && failures.Count == readers.Count) throw new InvalidOperationException(string.Join(" / ", failures));

@@ -10,7 +10,7 @@ import tomllib
 
 config = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'config.toml'
 install = Path(os.environ['LOCALAPPDATA']) / 'Programs/GoogleCalendarWidget'
-exe = install / (sys.argv[1] if len(sys.argv) > 1 else 'GoogleCalendarWidget-v5.7.0.exe')
+exe = install / (sys.argv[1] if len(sys.argv) > 1 else 'GoogleCalendarWidget-v5.8.1.exe')
 if not re.fullmatch(r'GoogleCalendarWidget-v[0-9.]+\.exe', exe.name) or exe.parent.resolve() != install.resolve() or not exe.is_file():
     raise RuntimeError('Expected an installed versioned widget executable.')
 original = config.read_bytes()

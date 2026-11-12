@@ -20,7 +20,7 @@ namespace TeamCalendar
     {
         public string Phase { get; private set; }
         public ReaderLifecycle() { Phase = "new"; }
-        public bool BeginInitial() { if (Phase != "new") return false; Phase = "connecting"; return true; }
+        public bool BeginInitial(bool allowInitialConnection = true) { if (Phase != "new" || !allowInitialConnection) return false; Phase = "connecting"; return true; }
         public void Connected() { if (Phase != "connecting") throw new InvalidOperationException(); Phase = "hidden"; }
         public void Lost() { if (Phase != "closed") Phase = "lost"; }
         public void Close() { Phase = "closed"; }
@@ -115,9 +115,10 @@ namespace TeamCalendar
             Win.SetParent(window, Win.DesktopHost());
             Win.SetWindowPos(window, new IntPtr(1), -16000, 0, 2000, 3600, 0x0010 | 0x0040 | 0x0020);
         }
-        bool Ensure(DateTime month)
+        bool Ensure(DateTime month, bool allowInitialConnection)
         {
-            if (!lifecycle.BeginInitial()) { lifecycle.RequireExisting(Live()); return false; }
+            if (lifecycle.Phase == "new" && !allowInitialConnection) throw new InvalidOperationException("읽기 연결이 없습니다. 새로고침은 창을 열지 않습니다. 설정에서 Google 계정을 연결해 주세요.");
+            if (!lifecycle.BeginInitial(allowInitialConnection)) { lifecycle.RequireExisting(Live()); return false; }
             var previous = new HashSet<IntPtr>(Win.ChromeWindows());
             string profile = ExistingChromeProfile.Resolve(App.Options.ActiveProfile(), App.Options.ActiveUser());
             string url = App.EmbedUrl(source) + "&dates=" + month.ToString("yyyyMMdd") + "/" + month.AddMonths(1).AddDays(-1).ToString("yyyyMMdd") + "&widget_reader=" + tag;
@@ -211,10 +212,10 @@ namespace TeamCalendar
             }
             finally { if (close != null) Invoke(close); }
         }
-        public Dictionary<string, object> Snapshot(DateTime month, bool reload)
+        public Dictionary<string, object> Snapshot(DateTime month, bool reload, bool allowInitialConnection = false)
         {
             if (disposed) throw new ObjectDisposedException("ChromeReaderWindow");
-            bool initial = Ensure(month); if (reload && !initial) Refresh();
+            bool initial = Ensure(month, allowInitialConnection); if (reload && !initial) Refresh();
             DateTime shown = DateTime.MinValue; var watch = Stopwatch.StartNew();
             while (watch.ElapsedMilliseconds < 30000 && !disposed)
             { try { shown = Header(AutomationElement.FromHandle(window)); break; } catch { Thread.Sleep(200); } }

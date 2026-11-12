@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
+using System.IO.Compression;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Windows.Forms;
 
 namespace TeamCalendar
@@ -42,6 +46,41 @@ namespace TeamCalendar
             Check(!original.updateNotifications && !original.autoSyncEnabled, "final Apply commits update preference independently of calendar synchronization", checks);
             var history = App.Json.Deserialize<UpdateHistory>(App.Json.Serialize(new UpdateHistory { notifiedVersion = "5.10.0" }));
             Check(history.notifiedVersion == "5.10.0", "notification identity persists without calendar content", checks);
+            int installs = 0;
+            using (var dialog = new UpdateCheckDialog("5.0.0", delegate { installs++; }))
+            {
+                dialog.Show(); dialog.Finish(new WidgetUpdate { version = "5.9.0", url = Release("5.9.0", "win-x64").assets[0].browser_download_url }, false);
+                var button = dialog.Controls.OfType<Button>().Single(b => b.Text == "업데이트하기");
+                button.PerformClick(); button.PerformClick();
+                Check(installs == 1 && !button.Enabled, "update button starts installation once rather than opening a browser", checks);
+                dialog.InstallFailed("fixture");
+                Check(button.Enabled, "failed preparation allows retry without closing the application", checks);
+                dialog.Close();
+            }
+            string fixture = Path.Combine(Path.GetTempPath(), "calendar-update-check-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(fixture);
+            try
+            {
+                string archive = Path.Combine(fixture, "release.zip"), output = Path.Combine(fixture, "app.exe");
+                string current = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+                using (var zip = ZipFile.Open(archive, ZipArchiveMode.Create)) zip.CreateEntryFromFile(Application.ExecutablePath, "release/" + UpdateInstaller.FileName(current));
+                UpdateInstaller.ExtractExecutable(archive, output, current);
+                Check(File.Exists(output), "real packaged executable extracted and assembly version verified", checks);
+                bool rejected = false;
+                try { UpdateInstaller.ExtractExecutable(archive, output, "0.0.1"); } catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "wrong-version package does not install", checks);
+                using (var hash = SHA256.Create()) using (var input = File.OpenRead(archive))
+                    UpdateInstaller.VerifyDigest(archive, "sha256:" + BitConverter.ToString(hash.ComputeHash(input)).Replace("-", "").ToLowerInvariant());
+                Check(true, "download SHA256 accepted when matching", checks);
+                rejected = false; try { UpdateInstaller.VerifyDigest(archive, "sha256:" + new string('0', 64)); } catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "corrupted download rejected", checks);
+                File.Delete(archive);
+                using (var zip = ZipFile.Open(archive, ZipArchiveMode.Create)) zip.CreateEntry("../outside.exe");
+                rejected = false; try { UpdateInstaller.ExtractExecutable(archive, output, current); } catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "archive path traversal rejected before extraction", checks);
+                using (var input = new StreamReader(Assembly.GetExecutingAssembly().GetManifestResourceStream("TeamCalendar.UpdateInstall.ps1")))
+                    Check(input.ReadToEnd().Contains("WaitForExit(30000)"), "post-exit update helper included in application", checks);
+            }
+            finally { Directory.Delete(fixture, true); }
             if (live) { UpdatePolicy.Select(UpdatePolicy.DownloadFeed(), "5.6.0", "win-x64"); Check(true, "real public GitHub release feed fetched by the native Windows client", checks); }
             return new { passed = checks.Count, checks = checks };
         }
