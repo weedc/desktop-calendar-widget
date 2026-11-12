@@ -47,6 +47,12 @@ def check(app,window):
         from PySide6.QtWidgets import QPushButton
         from test_updates import release
         import time
+        from widget import Job
+        delivered=[]
+        window.pool.start(Job(lambda:'fixture',lambda value:delivered.append(value),lambda error:delivered.append('error')))
+        deadline=time.monotonic()+2
+        while not delivered and time.monotonic()<deadline:app.processEvents();time.sleep(0.01)
+        assert delivered==['fixture'], 'background calendar callbacks must reach the UI thread'
         store.options['update_notifications']=False
         advanced=Advanced(store.options,window)
         original_reader=window.updater.reader

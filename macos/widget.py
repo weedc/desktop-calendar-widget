@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
-from PySide6.QtCore import Qt, QObject, Signal, QRunnable, QThreadPool, QTimer, QRectF, QUrl
+from PySide6.QtCore import Qt, QObject, Signal, Slot, QRunnable, QThreadPool, QTimer, QRectF, QUrl
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QLinearGradient, QPen, QFont, QIcon, QPixmap, QDesktopServices, QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QLineEdit, QListWidget, QListWidgetItem,
@@ -51,15 +51,29 @@ def button(text, function, layout):
 class JobSignals(QObject):
     done = Signal(object)
     error = Signal(str)
+    def __init__(self,completed,failed):
+        # Keep queued results alive after QRunnable returns and deliver them on
+        # the application's thread, including callbacks supplied as closures.
+        super().__init__(QApplication.instance())
+        self.completed=completed; self.failed=failed
+        self.done.connect(self.deliver_done); self.error.connect(self.deliver_error)
+
+    @Slot(object)
+    def deliver_done(self,value):
+        try:self.completed(value)
+        finally:self.deleteLater()
+
+    @Slot(str)
+    def deliver_error(self,message):
+        try:self.failed(message)
+        finally:self.deleteLater()
 
 
 class Job(QRunnable):
     def __init__(self, function, done, error):
         super().__init__()
         self.function = function
-        self.signals = JobSignals()
-        self.signals.done.connect(done)
-        self.signals.error.connect(error)
+        self.signals = JobSignals(done,error)
 
     def run(self):
         try:
