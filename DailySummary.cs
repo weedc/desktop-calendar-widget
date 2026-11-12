@@ -42,8 +42,9 @@ namespace TeamCalendar
     {
         string pendingDailyDate = "", pendingDailyTime = "";
         DateTimeOffset dailyDeadline, lastSystemNotice = DateTimeOffset.MinValue;
-        void ShowSystemNotice(string title, string body)
+        void ShowSystemNotice(string title, string body, string updateUrl = "")
         {
+            systemNoticeUpdateUrl = updateUrl;
             tray.ShowBalloonTip(15000, title, body, ToolTipIcon.Info);
             lastSystemNotice = DateTimeOffset.Now;
         }

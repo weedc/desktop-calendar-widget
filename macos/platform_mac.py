@@ -66,8 +66,8 @@ class Notifications:
                                        UNNotificationPresentationOptionSound)
         class CalendarNotificationDelegate(NSObject, protocols=[objc.protocolNamed('UNUserNotificationCenterDelegate')]):
             def userNotificationCenter_didReceiveNotificationResponse_withCompletionHandler_(self,center,response,complete):
-                day=response.notification().request().content().userInfo().get('date','')
-                callback(str(day)); complete()
+                info=response.notification().request().content().userInfo()
+                callback({'date':str(info.get('date','')),'url':str(info.get('update_url',''))}); complete()
             def userNotificationCenter_willPresentNotification_withCompletionHandler_(self,center,notification,complete):
                 complete(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList | UNNotificationPresentationOptionSound)
         self.delegate=CalendarNotificationDelegate.alloc().init()
@@ -88,7 +88,7 @@ class Notifications:
         content = UNMutableNotificationContent.alloc().init()
         content.setTitle_(alert['title'])
         content.setBody_(alert['body'])
-        content.setUserInfo_({'date': alert['date']})
+        content.setUserInfo_({'date': alert['date'],'update_url':alert.get('url','')})
         content.setSound_(UNNotificationSound.defaultSound())
         request = UNNotificationRequest.requestWithIdentifier_content_trigger_(alert['id'], content, None)
         self.center.addNotificationRequest_withCompletionHandler_(request, lambda error: done(error is None))

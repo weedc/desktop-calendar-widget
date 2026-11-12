@@ -46,6 +46,7 @@ namespace TeamCalendar
         public List<EmojiMark> emojis = new List<EmojiMark>();
         public List<ProjectMark> projectEmojis = new List<ProjectMark>();
         public bool compactEmojis = true, autoSyncEnabled = true;
+        public bool updateNotifications = true;
         public bool dailySummaryEnabled = true;
         public string dailySummaryCheckedDate = "", dailySummaryTime = "00:00";
         public void SetDailySummaryTime(string value) { if (dailySummaryTime != value) dailySummaryCheckedDate = ""; dailySummaryTime = value; }

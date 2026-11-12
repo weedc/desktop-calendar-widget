@@ -26,6 +26,7 @@ namespace TeamCalendar
             to.chromeProfile = from.chromeProfile; to.googleUser = from.googleUser;
             to.accountProfile = from.accountProfile; to.accountEmail = from.accountEmail; to.connectionMode = from.connectionMode;
             to.autoSyncEnabled = from.autoSyncEnabled; to.compactEmojis = from.compactEmojis;
+            to.updateNotifications = from.updateNotifications;
             to.dailySummaryEnabled = from.dailySummaryEnabled; to.SetDailySummaryTime(from.dailySummaryTime);
             to.remindersEnabled = from.remindersEnabled; to.allDayReminders = from.allDayReminders; to.reminderMinutes = 60;
         }

@@ -43,6 +43,21 @@ def check(app,window):
         command(window,dict(command='daily_summary',enabled=True,time='09:15')); assert store.options['summary_time']=='09:15'
         command(window,dict(command='delete_note',id=note['id'])); assert not store.data['notes']
         assert command(window,{'command':'due_reminders'})['alerts']==[]
+        # Exercise the real button and asynchronous completion while alerts are off.
+        from PySide6.QtWidgets import QPushButton
+        from test_updates import release
+        import time
+        store.options['update_notifications']=False
+        advanced=Advanced(store.options,window)
+        original_reader=window.updater.reader
+        window.updater.reader=lambda:[release('99.0.0',window.updater.state.target)]
+        next(b for b in advanced.findChildren(QPushButton) if b.text()=='지금 확인').click()
+        deadline=time.monotonic()+3
+        while window.updater.busy and time.monotonic()<deadline: app.processEvents(); time.sleep(0.01)
+        assert not window.updater.busy and window.updater.download.isEnabled(), (window.updater.busy,window.updater.message.text(),window.updater.dialog.isVisible(),window.updater.state.target)
+        assert '99.0.0' in window.updater.message.text() and not store.options['update_notifications']
+        assert window.updater.state.pending is None and not store.options['auto_sync']
+        window.updater.dialog.close(); advanced.reject(); window.updater.reader=original_reader
         import sys
         if sys.platform=='darwin':
             import platform_mac
