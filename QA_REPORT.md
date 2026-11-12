@@ -4,6 +4,14 @@ This release contains desktop widget source and generic documentation. Calendar 
 
 ## macOS port
 
+### Current release verification (2026-11-12)
+
+Mac 5.8.1 has published Apple Silicon and Intel bundles. The [Intel job](https://github.com/weedc/desktop-calendar-widget/actions/runs/43176846220/job/131043067368) and [Apple Silicon job](https://github.com/weedc/desktop-calendar-widget/actions/runs/43176846220/job/131043067598), built from `64d40db`, each ran 62 Python tests: 61 passed and one was skipped. Native synthetic UI checks, app-bundle verification and bundled CLI/startup checks also passed. Windows 5.8.2 (`6f2828a`) does not change the Mac sources or Mac workflow.
+
+The skipped test was `test_c_real_hidden_window_reuses_without_visibility_or_recreation`: neither runner exposed a usable Chrome GUI window. This is not a passing window-visibility test. Actual signed-in Google Calendar synchronization, repeated refresh without visible helper windows, and focus behavior remain **unverified on Mac**. No signed-in Mac is currently available for completing these checks; a future run must use the user's existing Chrome login and normal macOS permissions, without copying Windows credentials or disabling platform protections.
+
+On that Mac, verify initial account connection and event reads, three manual refreshes, next-month/return navigation, disabled automatic synchronization with explicit refresh, and connection-loss cache preservation. Observe native window visibility and focus throughout; only initial connection or an explicit reconnection may create a browser window. Report counts and outcomes without publishing account identifiers or calendar text.
+
 The separate `macos/` application uses Qt widgets and custom calendar painting, AppKit desktop window levels/all-Spaces behavior, a menu bar icon, local UserNotifications, and user-owned LaunchAgent startup. The native Windows application and platform-specific installer remain separate.
 
 Run `python3 -m unittest discover -s macos -p test_core.py -v` for model tests and `python3 macos/main.py --smoke-test` for synthetic UI checks. The macOS workflow builds both Apple Silicon and Intel apps, verifies signatures and packaged MCP framing, and exercises actual desktop window levels, all-Spaces flags, menu bar visibility, staged checkboxes, Apply/Cancel behavior, day-panel reuse, local notes, highlights, and manual emoji protection. These checks do not use Google credentials or real calendars.
