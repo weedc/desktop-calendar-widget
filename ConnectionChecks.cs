@@ -24,7 +24,7 @@ namespace TeamCalendar
             var snapshot = new Dictionary<string, object> { { "month", "2026-11" }, { "cells", cells } };
             var source = new CalendarSource { id = "demo@example.invalid", name = "예시", color = "#487F91" };
             var parsed = CalendarReader.Parse(snapshot, new DateTime(2026, 11, 1), source);
-            Check(parsed.events.Count == 1 && parsed.events[0].title == "가상 미팅" && parsed.events[0].sort == 870 && parsed.events[0].location == "회의실" && parsed.events[0].uid == "DBD6656405DA940F708D", "headless labels retain stable occurrence IDs, locations, time parsing and deduplication", checks);
+            Check(parsed.events.Count == 1 && parsed.events[0].title == "가상 미팅" && parsed.events[0].sort == 870 && parsed.events[0].location == "회의실" && parsed.events[0].uid == "DBD6656405DA940F708D", "accessible labels retain stable occurrence IDs, locations, time parsing and deduplication", checks);
             first["label"] = "일정 3개, 11월 1일"; rejected = false;
             try { CalendarReader.Parse(snapshot, new DateTime(2026, 11, 1), source); } catch (InvalidOperationException) { rejected = true; }
             Check(rejected, "an incomplete overflow read fails instead of replacing cached events", checks);

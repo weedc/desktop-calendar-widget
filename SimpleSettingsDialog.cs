@@ -13,7 +13,7 @@ namespace TeamCalendar
         readonly bool firstRun;
         readonly CalendarSourceList sources;
         readonly RadioButton accountMode, idMode;
-        readonly SoftButton connect, advanced, apply;
+        readonly SoftButton connect, idLogin, advanced, apply;
         readonly Label connection, selection, message;
         readonly TextBox calendarId;
         readonly Panel accountPanel, idPanel;
@@ -41,13 +41,12 @@ namespace TeamCalendar
             accountPanel = new Panel { Left = 0, Top = 152, Width = 620, Height = 93, BackColor = Design.Background }; Controls.Add(accountPanel);
             idPanel = new Panel { Left = 0, Top = 152, Width = 620, Height = 93, BackColor = Design.Background }; Controls.Add(idPanel);
             connect = Action("Google 계정 연결", 22, 155, 245, delegate { ConnectAccount(); });
-            var login = Action("Google 로그인 열기", 282, 155, 210, delegate { OpenLogin(); });
             connection = Caption("기존 Chrome 로그인을 사용합니다. 연결되면 캘린더 목록으로 자동 전환합니다.", 22, 202, 576); connection.Height = 42;
-            Reparent(accountPanel, connect); Reparent(accountPanel, login); Reparent(accountPanel, connection);
+            Reparent(accountPanel, connect); Reparent(accountPanel, connection);
             calendarId = Field("구글 캘린더 ID", 22, 155, 421); var idField = calendarId.Parent;
             var add = Action("추가", 456, 154, 142, delegate { StageCalendarId(); });
             var idHelp = Caption("기존 Chrome에서 이 캘린더에 접근할 수 있어야 합니다.", 22, 202, 402);
-            var idLogin = Action("Google 로그인 열기", 442, 202, 156, delegate { OpenLogin(); }); idHelp.Height = 42;
+            idLogin = Action("Google 로그인 열기", 442, 202, 156, delegate { OpenLogin(); }); idHelp.Height = 42;
             Reparent(idPanel, idField); Reparent(idPanel, add); Reparent(idPanel, idHelp); Reparent(idPanel, idLogin);
             Caption("2  표시할 캘린더 선택", 22, 261, 576);
             sources = new CalendarSourceList { Left = 22, Top = 298, Width = 576, Height = 199, Font = Font }; Controls.Add(sources);
@@ -92,7 +91,7 @@ namespace TeamCalendar
         async void OpenLogin()
         {
             if (connecting) return;
-            connecting = true; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = false;
+            connecting = true; connect.Enabled = idLogin.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = false;
             string profile = draft.Work.ActiveProfile(), email = draft.Work.ActiveUser();
             connection.Text = message.Text = "기존 Chrome 계정을 확인하는 중… 로그인 후 자동으로 돌아옵니다.";
             try
@@ -105,12 +104,12 @@ namespace TeamCalendar
                 message.Text = "Chrome 연결을 확인했습니다. ‘" + apply.Text + "’을 누르면 선택한 캘린더가 표시됩니다.";
             }
             catch (Exception error) { if (!IsDisposed) connection.Text = message.Text = error.Message; }
-            finally { if (!IsDisposed) { connecting = false; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = true; } }
+            finally { if (!IsDisposed) { connecting = false; connect.Enabled = idLogin.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = true; } }
         }
         async void ConnectAccount()
         {
             if (connecting) return;
-            connecting = true; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = false;
+            connecting = true; connect.Enabled = idLogin.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = false;
             string profile = draft.Work.accountProfile, email = draft.Work.accountEmail; int request = ++generation;
             connection.Text = "기존 Chrome 계정을 확인하는 중… 로그인 후 자동으로 돌아옵니다.";
             try
@@ -122,7 +121,7 @@ namespace TeamCalendar
                 message.Text = result.warnings.Count == 0 ? "표시할 캘린더에 체크한 뒤 ‘" + apply.Text + "’ 버튼을 누르세요." : "일부 특수 캘린더를 제외했습니다. 표시할 캘린더를 선택하세요.";
             }
             catch (Exception error) { if (!IsDisposed && request == generation) connection.Text = error.Message; }
-            finally { if (!IsDisposed) { connecting = false; connect.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = true; } }
+            finally { if (!IsDisposed) { connecting = false; connect.Enabled = idLogin.Enabled = apply.Enabled = advanced.Enabled = accountMode.Enabled = idMode.Enabled = true; } }
         }
         void OpenAdvanced()
         {

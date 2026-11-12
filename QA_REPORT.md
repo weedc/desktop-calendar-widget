@@ -24,7 +24,7 @@ The 73 isolated native checks use temporary synthetic data. They cover setup mig
 
 With an already-running widget, `python tests/run_mcp_checks.py --live` also checks seven MCP routes, cache-only queries, and stale classification rejection. It does not print event contents.
 
-The simplified setup and advanced dialog are additionally checked using synthetic native-form renders, isolated apply/cancel tests, and real settings-window interactions. The earlier connection adapter populated the inline checklist; its Google-login result does not validate the new 5.6 dedicated-profile adapter. Cancel/apply and selection preservation remain covered by the native tests. Live tests confirmed that advanced values stay pending until final Apply. Compact, intermediate and short-wide window sizes used stickers or original text as specified. Settings merge tests preserve notes, emoji choices and notification records changed while the dialog was open.
+The simplified setup and advanced dialog are additionally checked using synthetic native-form renders, isolated apply/cancel tests, and real settings-window interactions. The 5.7 existing-Chrome account discovery populated three calendars without another login, preserved the selected calendar, and reconnected only after Apply. Cancel/apply and selection preservation remain covered by the native tests. Live tests confirmed that advanced values stay pending until final Apply. Compact, intermediate and short-wide window sizes used stickers or original text as specified. Settings merge tests preserve notes, emoji choices and notification records changed while the dialog was open.
 
 ## Windows integration checks performed
 

@@ -20,6 +20,7 @@ jobs:
           - runner: macos-15-intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,6 +30,7 @@ jobs:
         run: |
           if [ ! -d '/Applications/Google Chrome.app' ]; then brew install --cask google-chrome; fi
       - name: Install runtime and test model
+        timeout-minutes: 8
         env:
           CALENDAR_WIDGET_NATIVE_CHROME_TEST: '1'
         run: |

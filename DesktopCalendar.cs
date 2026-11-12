@@ -315,7 +315,7 @@ namespace TeamCalendar
         }
         void UpdateMonthLabel() { monthLabel.Text = month.ToString("yyyy년 M월"); Invalidate(); }
         void MoveMonth(int amount) { SetMonth(month.AddMonths(amount)); }
-        void SetMonth(DateTime date) { month = new DateTime(date.Year, date.Month, 1); UpdateMonthLabel(); RefreshMonth(false); }
+        void SetMonth(DateTime date) { month = new DateTime(date.Year, date.Month, 1); LoadCachedMonth(month); UpdateMonthLabel(); RefreshMonth(false); }
         void PickMonth()
         {
             using (var dialog = new Form { Text = "표시할 달", Size = new Size(280, 150), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false })

@@ -184,7 +184,7 @@ class Settings(QDialog):
             sources[item.data(Qt.ItemDataRole.UserRole)['id']]['enabled'] = item.checkState() == Qt.CheckState.Checked
 
     def populate(self):
-        self.connect_button.setVisible(self.draft['mode']=='account'); self.id_row.setVisible(self.draft['mode']=='id')
+        self.connect_button.setVisible(self.draft['mode']=='account'); self.login_button.setVisible(self.draft['mode']=='id'); self.id_row.setVisible(self.draft['mode']=='id')
         self.list.clear()
         other_key = 'id_calendars' if self.draft['mode']=='account' else 'account_calendars'
         other = {s['id'] for s in self.draft[other_key]}

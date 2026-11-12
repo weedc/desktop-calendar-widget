@@ -167,32 +167,38 @@ class NativeMacTests(unittest.TestCase):
         import Quartz,AppKit
         browser=GoogleBrowser(); stop=threading.Event(); exposed=[]; sampler=None
         with tempfile.TemporaryDirectory(prefix='calendar-native-chrome-') as folder:
-            subprocess.run(['/usr/bin/open','-n','-a','/Applications/Google Chrome.app','--args','--no-first-run','--no-default-browser-check','--disable-background-mode','--user-data-dir='+folder,'about:blank'],check=True,capture_output=True)
-            application=None
-            for _ in range(100):
-                apps=AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_('com.google.Chrome')
-                if apps: application=apps[0]; break
-                time.sleep(.1)
-            self.assertIsNotNone(application,'Chrome did not start through Launch Services')
-            process_id=application.processIdentifier()
+            application=None; process_id=None; launcher=None
             def onscreen():
                 return {w[Quartz.kCGWindowNumber] for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly,Quartz.kCGNullWindowID) if w.get(Quartz.kCGWindowOwnerPID)==process_id and w.get(Quartz.kCGWindowLayer)==0}
             def url(month):
                 return 'https://calendar.google.com/calendar/embed?'+urlencode(dict(src='en.usa#holiday@group.v.calendar.google.com',hl='ko',dates=month+'01/'+month+'28',widget_reader=browser.tag))
             try:
+                print('Native Chrome probe: launching an empty disposable profile',flush=True)
+                launcher=subprocess.Popen(['/usr/bin/open','-n','-a','/Applications/Google Chrome.app','--args','--no-first-run','--no-default-browser-check','--disable-background-mode','--user-data-dir='+folder,'about:blank'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                for _ in range(100):
+                    apps=AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_('com.google.Chrome')
+                    if apps: application=apps[0]; process_id=application.processIdentifier(); break
+                    time.sleep(.1)
+                if application is None: self.skipTest('runner has no usable Chrome GUI session; no permission was changed')
                 for _ in range(150):
                     if onscreen(): break
                     time.sleep(.1)
-                self.assertTrue(onscreen(),'Chrome did not create its initial test window')
+                if not onscreen(): self.skipTest('runner did not expose a Chrome GUI window; no permission was changed')
+                print('Native Chrome probe: initial frame exists; checking Apple Events',flush=True)
                 try:
                     browser.navigate(url('202611'))
-                    for _ in range(100):
+                    ready=False
+                    deadline=time.monotonic()+10
+                    while time.monotonic()<deadline:
                         try:
-                            browser.apple(browser.scope()+'return id of w\nend tell'); break
-                        except RuntimeError: time.sleep(.1)
+                            browser.apple(browser.scope()+'return id of w\nend tell'); ready=True; break
+                        except RuntimeError as error:
+                            if '자동화' in str(error) or 'JavaScript' in str(error): raise
+                            time.sleep(.1)
+                    self.assertTrue(ready,'initial Chrome document did not become ready')
                     browser.hide()
                 except RuntimeError as error:
-                    if '자동화' in str(error): self.skipTest('runner has not granted Chrome Automation; no permission was changed')
+                    if '자동화' in str(error): self.skipTest('runner Chrome Automation was denied or did not respond; no permission was changed')
                     raise
                 owned=browser.window_id
                 count=browser.apple('tell application "Google Chrome" to return count of windows')
@@ -226,7 +232,11 @@ class NativeMacTests(unittest.TestCase):
                 stop.set()
                 if sampler: sampler.join(timeout=3)
                 browser.close()
-                if not application.isTerminated():
+                if launcher and launcher.poll() is None:
+                    launcher.terminate()
+                    try: launcher.wait(timeout=3)
+                    except subprocess.TimeoutExpired: launcher.kill(); launcher.wait(timeout=3)
+                if application is not None and not application.isTerminated():
                     try: os.kill(process_id,signal.SIGTERM)
                     except ProcessLookupError: pass
                     for _ in range(50):
