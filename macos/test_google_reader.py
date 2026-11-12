@@ -180,7 +180,10 @@ class NativeMacTests(unittest.TestCase):
                     if apps: application=apps[0]; process_id=application.processIdentifier(); break
                     time.sleep(.1)
                 if application is None: self.skipTest('runner has no usable Chrome GUI session; no permission was changed')
-                for _ in range(150):
+                # A freshly installed Chrome may still be undergoing macOS's
+                # normal first-launch verification. Wait without changing any
+                # Gatekeeper, quarantine, or Automation settings.
+                for _ in range(1800):
                     if onscreen(): break
                     time.sleep(.1)
                 if not onscreen(): self.skipTest('runner did not expose a Chrome GUI window; no permission was changed')
