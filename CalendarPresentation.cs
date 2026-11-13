@@ -74,7 +74,6 @@ namespace TeamCalendar
             var mark = EmojiData.Assign(features, item, App.Str(args, "icon"), App.Str(args, "activity"), App.Str(args, "label"), App.Str(args, "project"), false);
             SaveFeatures(); return mark;
         }
-        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); if (Width < 1 || Height < 1) return; using (var path = Design.Round(new RectangleF(0, 0, Width, Height), Design.WindowRadius)) { var old = Region; Region = new Region(path); if (old != null) old.Dispose(); } }
         internal Color EventColor(CalendarEvent item) { return Design.EventColor(features, item); }
         internal EmojiMark EventEmoji(CalendarEvent item) { return EmojiData.Resolve(features, item); }
         internal void SetManualEmoji(CalendarEvent item, string icon, string label, string project, bool wholeProject)

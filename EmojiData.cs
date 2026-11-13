@@ -87,7 +87,8 @@ namespace TeamCalendar
         }
         public static EmojiMark Resolve(FeatureState state, CalendarEvent item)
         {
-            var mark = state.emojis.FirstOrDefault(m => m.key == Key(item)) ?? Guess(item);
+            string key = Key(item);
+            var mark = state.emojis.FirstOrDefault(m => m.key == key) ?? Guess(item);
             var result = new EmojiMark { key = mark.key, icon = mark.icon, activity = mark.activity, label = mark.label, project = mark.project, source = mark.source };
             if (mark.source == "manual") return result;
             var project = state.projectEmojis.FirstOrDefault(p => p.calendarId == item.calendarId && (string.Equals(p.project, mark.project, StringComparison.OrdinalIgnoreCase) || p.project.Length > 1 && (item.title ?? "").IndexOf(p.project, StringComparison.OrdinalIgnoreCase) >= 0));

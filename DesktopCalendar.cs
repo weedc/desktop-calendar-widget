@@ -197,6 +197,7 @@ namespace TeamCalendar
         readonly Dictionary<string, DateTime> syncAttempts = new Dictionary<string, DateTime>();
         bool pendingVisibleRefresh;
         int syncStarted, syncCompleted;
+        ResizeFrame resizeFrame;
         string syncMessage = "구글 캘린더 연결 중…", hover = "";
         int rowCount = 6;
         const int HeaderHeight = 38, WeekHeight = 26, FooterHeight = 23;
@@ -210,6 +211,7 @@ namespace TeamCalendar
             BackColor = Design.Background; ForeColor = Color.FromArgb(241, 248, 252);
             Font = new Font("맑은 고딕", settings.FontSize);
             DoubleBuffered = true; SetStyle(ControlStyles.ResizeRedraw, true); KeyPreview = true;
+            resizeFrame = new ResizeFrame(this, Design.WindowRadius);
             ShowInTaskbar = !settings.Desktop; Icon = MakeIcon();
             SetInitialPosition();
             initialPosition = Location;
@@ -268,7 +270,7 @@ namespace TeamCalendar
             ResizeEnd += delegate { Save(); };
             KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Left) MoveMonth(-1); else if (e.KeyCode == Keys.Right) MoveMonth(1); else if (e.KeyCode == Keys.Home) SetMonth(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)); else if (e.KeyCode == Keys.F5) RefreshMonth(true); };
             MouseMove += HoverEvent; MouseDoubleClick += OpenDay;
-            CalendarResize.Attach(this, delegate { Save(); if (pinned) Win.RepaintDesktop(); });
+            CalendarResize.Attach(this, delegate { Save(); if (pinned) Win.RepaintDesktop(); }, null, resizeFrame.SetResizing);
             tray = new NotifyIcon { Icon = Icon, Text = "팀 캘린더", ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += delegate { ShowWidget(); };
             pulse = new System.Windows.Forms.Timer { Interval = 500 };
