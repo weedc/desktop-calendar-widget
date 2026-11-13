@@ -26,7 +26,7 @@ namespace TeamCalendar
         readonly TrackBar opacity;
         readonly Label message;
         CalendarSource selected;
-        bool loading;
+        bool loading, connecting;
         public bool ConnectionOpened { get; private set; }
         sealed class SourceItem
         {
@@ -36,17 +36,17 @@ namespace TeamCalendar
         public CalendarAdvancedSettings(CalendarSettingsDraft pending, Action testSummary) : base("고급 설정", new Size(690, 710))
         {
             parent = pending; draft = new CalendarSettingsDraft(parent.Work, parent.Appearance, parent.Appearance.Desktop, parent.Startup, parent.Profiles) { OpenCodex = parent.OpenCodex };
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.CenterParent; KeepOpen = delegate { return connecting; };
             Caption("기존 Chrome 계정", 22, 76, 315); Caption("계정 이메일 (선택)", 350, 76, 318);
             var login = Action("Google 로그인 열기", 22, 103, 310, async delegate
             {
-                string loginEmail = email.Text.Trim(), loginProfile = draft.Work.ActiveProfile(); message.Text = "Chrome 계정을 확인하는 중…";
+                connecting = true; string loginEmail = email.Text.Trim(), loginProfile = draft.Work.ActiveProfile(); message.Text = "Chrome 계정을 확인하는 중…";
                 try
                 {
                     var result = await System.Threading.Tasks.Task.Run(delegate { return AccountDiscovery.Read(loginProfile, loginEmail, null); });
                     if (!IsDisposed) { ConnectionOpened = true; if (draft.Work.connectionMode == "account") draft.UseAccountCatalog(result); else { draft.Work.chromeProfile = result.profile; draft.Work.googleUser = result.email; } email.Text = result.email; ReloadCalendars(); message.Text = "Chrome 연결을 확인했습니다. 돌아간 뒤 적용해 주세요."; }
                 }
-                catch (Exception error) { if (!IsDisposed) message.Text = error.Message; }
+                catch (Exception error) { if (!IsDisposed) message.Text = error.Message; } finally { connecting = false; }
             });
             email = Field("구글 계정 이메일", 350, 103, 318); email.Text = draft.Work.ActiveUser();
             Caption("캘린더 관리", 22, 158, 310); Caption("표시 이름", 350, 158, 318);
@@ -89,7 +89,7 @@ namespace TeamCalendar
         {
             var box = new CheckBox { Text = text, AccessibleName = text, Left = x, Top = y, Width = width, Height = 28, Checked = enabled, ForeColor = Design.Text }; Controls.Add(box); return box;
         }
-        void SaveSource() { if (selected == null) return; string value = nickname.Text.Trim(); if (value != "") selected.name = value; selected.color = palette.Selected; }
+        void SaveSource() { if (selected == null) return; string value = nickname.Text.Trim(); if (value != "") selected.name = value; draft.Work.SetSourceColor(selected, selected.owner, palette.Selected); }
         void LoadSource()
         {
             var item = calendar.SelectedItem as SourceItem; selected = item == null ? null : item.Source;

@@ -19,6 +19,7 @@ namespace TeamCalendar
         readonly Panel accountPanel, idPanel;
         readonly Action testSummary;
         CalendarAdvancedSettings advancedWindow;
+        SourceAppearanceDialog appearanceWindow;
         bool changing, connecting;
         int generation;
         public int OpacityValue { get { return draft.Appearance.Opacity; } }
@@ -31,7 +32,7 @@ namespace TeamCalendar
         public CalendarManager(FeatureState state, Settings appearance, bool pinned, bool autoStart, Action codexSetup, Action summaryPreview, bool initialSetup = false, System.Collections.Generic.IEnumerable<FeatureState.Profile> profiles = null)
             : base(initialSetup || !state.setupCompleted ? "캘린더 시작하기" : "캘린더 설정", new Size(620, 650))
         {
-            original = state; firstRun = initialSetup || !state.setupCompleted; testSummary = summaryPreview;
+            original = state; firstRun = initialSetup || !state.setupCompleted; testSummary = summaryPreview; KeepOpen = delegate { return connecting; };
             draft = new CalendarSettingsDraft(state, appearance, pinned, autoStart, profiles); StartPosition = FormStartPosition.CenterScreen;
             if (firstRun && draft.Work.calendars.Count == 0 && draft.Work.accountCalendars.Count == 0) draft.Work.connectionMode = "account";
             Caption("1  캘린더 연결", 22, 76, 576);
@@ -50,6 +51,13 @@ namespace TeamCalendar
             Reparent(idPanel, idField); Reparent(idPanel, add); Reparent(idPanel, idHelp); Reparent(idPanel, idLogin);
             Caption("2  표시할 캘린더 선택", 22, 261, 576);
             sources = new CalendarSourceList { Left = 22, Top = 298, Width = 576, Height = 199, Font = Font }; Controls.Add(sources);
+            sources.EditAppearance = delegate(string sourceId)
+            {
+                if (appearanceWindow != null && !appearanceWindow.IsDisposed) appearanceWindow.Close();
+                appearanceWindow = new SourceAppearanceDialog(draft.Work, sourceId);
+                appearanceWindow.FormClosed += delegate { if (!IsDisposed) ReloadSources(); };
+                appearanceWindow.Show(this);
+            };
             sources.CheckedChanged = delegate(string sourceId, bool enabled) { draft.Work.ConnectionSources().First(c => c.id == sourceId).enabled = enabled; UpdateSelection(); };
             selection = Caption("", 22, 510, 576);
             message = Caption("‘" + (firstRun ? "시작하기" : "적용") + "’ 버튼을 누르면 변경 사항이 저장됩니다.", 22, 547, 576); message.Height = 45;
@@ -81,7 +89,7 @@ namespace TeamCalendar
         {
             bool account = draft.Work.connectionMode == "account";
             sources.EmptyMessage = account ? "Google 계정을 연결하면 캘린더 목록이 여기에 나타납니다." : "위에 캘린더 ID를 입력해 주세요.";
-            sources.SetItems(draft.Work.ActiveCalendars().Select(c => new SourceChoice { id = c.id, name = c.name, color = c.color, enabled = c.enabled, context = account ? "" : c.id }).ToList()); UpdateSelection();
+            sources.SetItems(draft.Work.ActiveCalendars().Select(c => new SourceChoice { id = c.id, name = c.name, color = c.color, enabled = c.enabled, context = FeatureState.OwnerKey(c) != "" ? FeatureState.OwnerKey(c) : account ? "색상 버튼으로 소유자 지정" : c.id }).ToList()); UpdateSelection();
         }
         bool StageCalendarId()
         {

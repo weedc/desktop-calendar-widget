@@ -207,7 +207,7 @@ namespace TeamCalendar
             Text = "투명 팀 캘린더 · " + App.Name;
             FormBorderStyle = FormBorderStyle.None; StartPosition = FormStartPosition.Manual;
             MinimumSize = new Size(700, 410); Size = new Size(settings.Width, settings.Height);
-            BackColor = Color.FromArgb(20, 43, 56); ForeColor = Color.FromArgb(241, 248, 252);
+            BackColor = Design.Background; ForeColor = Color.FromArgb(241, 248, 252);
             Font = new Font("맑은 고딕", settings.FontSize);
             DoubleBuffered = true; SetStyle(ControlStyles.ResizeRedraw, true); KeyPreview = true;
             ShowInTaskbar = !settings.Desktop; Icon = MakeIcon();
@@ -249,7 +249,7 @@ namespace TeamCalendar
             menu.Items.Add("종료", null, delegate { Close(); });
             ContextMenuStrip = menu;
 
-            toolbar = new Panel { Dock = DockStyle.Top, Height = HeaderHeight, BackColor = Color.FromArgb(24, 46, 60) };
+            toolbar = new Panel { Dock = DockStyle.Top, Height = HeaderHeight, BackColor = Design.Header };
             nameLabel = new Label { Text = "▦  " + App.Name, AutoSize = false, Width = 250, Height = HeaderHeight, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), Font = new Font("맑은 고딕", 9.5F), Cursor = Cursors.SizeAll, AccessibleName = "위젯 이동" };
             monthLabel = new Label { TextAlign = ContentAlignment.MiddleCenter, Font = new Font("맑은 고딕", 12, FontStyle.Bold), Cursor = Cursors.Hand, AccessibleName = "표시 중인 달 · 클릭해서 이동" };
             monthLabel.Click += delegate { PickMonth(); };
@@ -324,14 +324,21 @@ namespace TeamCalendar
         void UpdateMonthLabel() { monthLabel.Text = month.ToString("yyyy년 M월"); LayoutMonthNavigation(); Invalidate(); }
         void MoveMonth(int amount) { SetMonth(month.AddMonths(amount)); }
         void SetMonth(DateTime date) { month = new DateTime(date.Year, date.Month, 1); LoadCachedMonth(month); UpdateMonthLabel(); RefreshMonth(false); }
+        ThemeWindow monthPicker;
         void PickMonth()
         {
-            using (var dialog = new Form { Text = "표시할 달", Size = new Size(280, 150), StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false })
-            {
-                var picker = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "yyyy년 M월", ShowUpDown = true, Value = month, Left = 20, Top = 15, Width = 220 };
-                var ok = new Button { Text = "이동", DialogResult = DialogResult.OK, Left = 150, Top = 60, Width = 90 }; dialog.Controls.Add(picker); dialog.Controls.Add(ok); dialog.AcceptButton = ok;
-                if (dialog.ShowDialog() == DialogResult.OK) SetMonth(picker.Value);
-            }
+            if (monthPicker != null && !monthPicker.IsDisposed) { monthPicker.Activate(); return; }
+            var popup = new ThemeWindow("표시할 달", new Size(330, 210)); monthPicker = popup;
+            popup.StartPosition = FormStartPosition.CenterScreen;
+            var year = new SettingsChoice { Left = 22, Top = 78, Width = 155, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Design.Panel, ForeColor = Design.Text, FlatStyle = FlatStyle.Flat, AccessibleName = "표시할 연도" };
+            var selectedMonth = new SettingsChoice { Left = 190, Top = 78, Width = 118, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Design.Panel, ForeColor = Design.Text, FlatStyle = FlatStyle.Flat, AccessibleName = "표시할 월" };
+            for (int y = month.Year - 20; y <= month.Year + 20; y++) year.Items.Add(y);
+            for (int m = 1; m <= 12; m++) selectedMonth.Items.Add(m);
+            year.SelectedItem = month.Year; selectedMonth.SelectedItem = month.Month;
+            var ok = new SoftButton { Text = "이동", AccessibleName = "선택한 달로 이동", Left = 190, Top = 148, Width = 118, Height = 34 };
+            ok.Click += delegate { SetMonth(new DateTime((int)year.SelectedItem, (int)selectedMonth.SelectedItem, 1)); popup.Close(); };
+            popup.Controls.Add(year); popup.Controls.Add(selectedMonth); popup.Controls.Add(ok); popup.AcceptButton = ok;
+            popup.FormClosed += delegate { monthPicker = null; }; popup.Show();
         }
         void RefreshMonth(bool force, DateTime? backgroundMonth = null, bool allowInitialConnection = false)
         {
@@ -404,9 +411,9 @@ namespace TeamCalendar
                         var item = list[j]; var bounds = new Rectangle(cell.X + 5, cell.Y + 29 + j * lineHeight, cell.Width - 10, lineHeight - 2);
                         bool allDay = item.allDay || item.isNote;
                         var eventAccent = features.highlights.FirstOrDefault(a => a.key == item.uid);
-                        Color barColor = eventAccent != null ? Design.Parse(eventAccent.color) : item.isNote ? Design.Parse(item.color) : ControlPaint.Dark(Design.Parse(item.color), .25F);
+                        Color barColor = eventAccent != null ? Design.Parse(eventAccent.color) : item.isNote ? Design.Parse(item.color) : ControlPaint.Dark(EventColor(item), .25F);
                         if (allDay || IsImportant(item)) using (var bar = new SolidBrush(Color.FromArgb(225, barColor))) using (var path = Design.Round(bounds, 5)) g.FillPath(bar, path);
-                        else using (var dot = new SolidBrush(Design.Parse(item.color))) g.FillEllipse(dot, bounds.X + 1, bounds.Y + 7, 4, 4);
+                        else using (var dot = new SolidBrush(EventColor(item))) g.FillEllipse(dot, bounds.X + 1, bounds.Y + 7, 4, 4);
                         string time = allDay ? "" : item.time.Split('~')[0].Replace("오전 ", "").Replace("오후 ", "PM ").Replace("시", "");
                         string text = (IsImportant(item) ? "★ " : "") + (allDay ? (item.isNote && item.time != "메모" ? item.time + " " : "") : time + " ") + item.title;
                         TextRenderer.DrawText(g, text, Font, new Rectangle(bounds.X + (allDay ? 3 : 9), bounds.Y, bounds.Width - (allDay ? 5 : 9), bounds.Height), ForeColor, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);

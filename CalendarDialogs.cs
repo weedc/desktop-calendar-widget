@@ -11,7 +11,7 @@ namespace TeamCalendar
 {
     sealed class SoftButton : Button
     {
-        public Color Fill = Color.FromArgb(47, 79, 96);
+        public Color Fill = Design.Button;
         bool hover;
         public SoftButton() { FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; ForeColor = Design.Text; Cursor = Cursors.Hand; Font = new Font("맑은 고딕", 9.5F); }
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -19,7 +19,7 @@ namespace TeamCalendar
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(Parent == null ? Design.Background : Parent.BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = Design.Round(new RectangleF(0, 0, Width - 1, Height - 1), 7)) using (var fill = new SolidBrush(hover ? ControlPaint.Light(Fill, .12F) : Fill)) e.Graphics.FillPath(fill, path);
+            using (var path = Design.Round(new RectangleF(0, 0, Width - 1, Height - 1), Design.ControlRadius)) using (var fill = new SolidBrush(hover ? ControlPaint.Light(Fill, .12F) : Fill)) e.Graphics.FillPath(fill, path);
             TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Enabled ? ForeColor : Design.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
     }
@@ -27,11 +27,23 @@ namespace TeamCalendar
     {
         public readonly Label Heading;
         Point start, origin; bool dragging;
+        public Func<bool> KeepOpen;
+        internal static bool ShouldDismiss(Form popup, Form active) { for (var current = active; current != null; current = current.Owner) if (current == popup) return false; return true; }
+        protected override void OnDeactivate(EventArgs e)
+        {
+            base.OnDeactivate(e);
+            if (!IsHandleCreated || IsDisposed) return;
+            BeginInvoke((System.Action)delegate { if (!IsDisposed && Visible && Enabled && (KeepOpen == null || !KeepOpen()) && ShouldDismiss(this, Form.ActiveForm)) { ThemeWindow root = this; while (root.Owner is ThemeWindow) root = (ThemeWindow)root.Owner; if (ShouldDismiss(root, Form.ActiveForm)) root.Close(); else Close(); } });
+        }
+        void Shape() { if (Width <= 0 || Height <= 0) return; using (var path = Design.Round(new RectangleF(0, 0, Width, Height), Design.WindowRadius)) { var old = Region; Region = new Region(path); if (old != null) old.Dispose(); } }
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Shape(); }
+        protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using (var path = Design.Round(new RectangleF(0.5F, 0.5F, Width - 1, Height - 1), Design.WindowRadius)) using (var pen = new Pen(Design.Border)) e.Graphics.DrawPath(pen, path); }
         public ThemeWindow(string title, Size size)
         {
+            KeyPreview = true; KeyDown += delegate(object sender, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) { e.Handled = true; Close(); } };
             Text = title; Size = size; FormBorderStyle = FormBorderStyle.None; StartPosition = FormStartPosition.Manual;
             BackColor = Design.Background; ForeColor = Design.Text; Font = new Font("맑은 고딕", 10);
-            var header = new Panel { Dock = DockStyle.Top, Height = 52, Width = size.Width, BackColor = Color.FromArgb(29, 51, 65) };
+            var header = new Panel { Dock = DockStyle.Top, Height = 52, Width = size.Width, BackColor = Design.Header };
             Heading = new Label { Text = title, Left = 20, Top = 0, Height = 52, Width = size.Width - 85, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 12, FontStyle.Bold), Cursor = Cursors.SizeAll };
             var close = new SoftButton { Text = "×", AccessibleName = "닫기", Width = 34, Height = 32, Left = size.Width - 48, Top = 10, Anchor = AnchorStyles.Top | AnchorStyles.Right, Fill = header.BackColor };
             close.Click += delegate { Close(); }; header.Controls.Add(Heading); header.Controls.Add(close); Controls.Add(header);
@@ -41,12 +53,12 @@ namespace TeamCalendar
                 c.MouseMove += delegate { if (dragging) Location = new Point(origin.X + Cursor.Position.X - start.X, origin.Y + Cursor.Position.Y - start.Y); };
                 c.MouseUp += delegate(object s, MouseEventArgs e) { dragging = false; ((Control)s).Capture = false; };
             }
-            Resize += delegate { using (var path = Design.Round(new RectangleF(0, 0, Width, Height), 13)) { var old = Region; Region = new Region(path); if (old != null) old.Dispose(); } };
+            Resize += delegate { Shape(); };
         }
         protected Label Caption(string text, int x, int y, int width) { var l = new Label { Text = text, Left = x, Top = y, Width = width, Height = 24, ForeColor = Design.Muted }; Controls.Add(l); return l; }
         protected TextBox Field(string accessibleName, int x, int y, int width, int height = 31, bool multiline = false)
         {
-            var panel = new Panel { Left = x, Top = y, Width = width, Height = height, BackColor = Design.Panel, Padding = new Padding(9, 5, 9, 5) };
+            var panel = new RoundedField { Left = x, Top = y, Width = width, Height = height, BackColor = Design.Panel, Padding = new Padding(9, 5, 9, 5) };
             var field = new TextBox { AccessibleName = accessibleName, Multiline = multiline, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill, BackColor = Design.Panel, ForeColor = Design.Text, Font = Font, ScrollBars = ScrollBars.None };
             panel.Controls.Add(field); Controls.Add(panel); return field;
         }
@@ -54,6 +66,10 @@ namespace TeamCalendar
         {
             var b = new SoftButton { Text = text, AccessibleName = text, Left = x, Top = y, Width = width, Height = 34 }; b.Click += handler; Controls.Add(b); return b;
         }
+    }
+    sealed class RoundedField : Panel
+    {
+        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); if (Width < 1 || Height < 1) return; using (var path = Design.Round(ClientRectangle, Design.ControlRadius)) { var old = Region; Region = new Region(path); if (old != null) old.Dispose(); } }
     }
     sealed class ColorPalette : Control
     {
@@ -67,7 +83,7 @@ namespace TeamCalendar
             {
                 var rect = new Rectangle(i * 38 + 2, 3, 27, 24);
                 using (var path = Design.Round(rect, 6)) using (var brush = new SolidBrush(Design.Parse(Design.Colors[i]))) e.Graphics.FillPath(brush, path);
-                if (Selected == Design.Colors[i]) using (var pen = new Pen(Design.Text, 2)) e.Graphics.DrawRectangle(pen, rect.X - 1, rect.Y - 1, rect.Width + 2, rect.Height + 2);
+                if (Selected == Design.Colors[i]) using (var pen = new Pen(Design.Text, 2)) using (var outline = Design.Round(new RectangleF(rect.X - 2, rect.Y - 2, rect.Width + 4, rect.Height + 4), Design.ControlRadius)) e.Graphics.DrawPath(pen, outline);
             }
         }
         protected override void OnMouseDown(MouseEventArgs e) { int index = e.X / 38; if (index >= 0 && index < Design.Colors.Length) { Selected = Design.Colors[index]; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); } }
@@ -77,6 +93,7 @@ namespace TeamCalendar
         public List<CalendarEvent> Items = new List<CalendarEvent>();
         public Action<CalendarEvent> Selected;
         public Func<CalendarEvent, bool> Important;
+        public Func<CalendarEvent, Color> ItemColor;
         public string EmptyMessage = "등록된 일정이 없습니다. 아래에 메모를 남겨 보세요.";
         int scroll, selection = -1;
         const int RowHeight = 58;
@@ -97,7 +114,7 @@ namespace TeamCalendar
                 int y = i * RowHeight - scroll; if (y + RowHeight < 0 || y > Height) continue;
                 var item = Items[i]; var rect = new Rectangle(0, y + 2, Width - 13, RowHeight - 6);
                 using (var path = Design.Round(rect, 8)) using (var brush = new SolidBrush(i == selection ? Color.FromArgb(53, 82, 100) : Design.Panel)) e.Graphics.FillPath(brush, path);
-                using (var brush = new SolidBrush(Design.Parse(item.color))) e.Graphics.FillRectangle(brush, rect.Left + 8, rect.Top + 11, 3, 28);
+                using (var brush = new SolidBrush((ItemColor == null ? Design.Parse(item.color) : ItemColor(item)))) e.Graphics.FillRectangle(brush, rect.Left + 8, rect.Top + 11, 3, 28);
                 TextRenderer.DrawText(e.Graphics, (Important != null && Important(item) ? "★ " : "") + item.title, Font, new Rectangle(20, y + 7, Width - 42, 24), Design.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
                 using (var small = new Font("맑은 고딕", 8.5F)) TextRenderer.DrawText(e.Graphics, item.time + "  ·  " + item.calendarName, small, new Rectangle(20, y + 30, Width - 42, 18), Design.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             }
@@ -107,6 +124,21 @@ namespace TeamCalendar
                 float y = scroll / (float)(Items.Count * RowHeight - Height) * (Height - thumb);
                 using (var path = Design.Round(new RectangleF(Width - 5, y, 4, thumb), 2)) using (var brush = new SolidBrush(Color.FromArgb(91, 126, 145))) e.Graphics.FillPath(brush, path);
             }
+        }
+    }
+    sealed class SourceAppearanceDialog : ThemeWindow
+    {
+        public SourceAppearanceDialog(FeatureState state, string sourceId) : base("캘린더 색상 · 소유자", new Size(520, 330))
+        {
+            var source = state.ConnectionSources().First(c => c.id == sourceId);
+            StartPosition = FormStartPosition.CenterParent;
+            var name = Caption(source.name, 22, 70, 476); name.AutoEllipsis = true;
+            Caption("소유자 계정 (선택)", 22, 108, 476);
+            var owner = Field("캘린더 소유자 계정", 22, 137, 476); owner.Text = FeatureState.OwnerKey(source);
+            Caption("같은 소유자 계정의 캘린더는 같은 색으로 표시합니다.", 22, 182, 476);
+            var colors = new ColorPalette { Left = 22, Top = 218, Selected = source.color }; Controls.Add(colors);
+            Action("취소", 254, 275, 115, delegate { Close(); });
+            Action("선택", 383, 275, 115, delegate { state.SetSourceColor(source, owner.Text, colors.Selected); DialogResult = DialogResult.OK; Close(); });
         }
     }
     sealed class DayDetails : ThemeWindow
@@ -129,7 +161,7 @@ namespace TeamCalendar
             owner = calendar;
             Caption("일정을 선택해 중요 표시와 이모지를 바꿔 보세요.", 20, 66, 380);
             emojiEdit = Action("이모지 설정", 415, 61, 155, delegate { if (selected != null) { SavePending(); owner.ShowEmojiEditor(selected); } }); emojiEdit.Enabled = false;
-            list = new EventCanvas { Left = 20, Top = 95, Width = 550, Height = 230, Font = Font, Important = owner.IsImportant }; Controls.Add(list);
+            list = new EventCanvas { Left = 20, Top = 95, Width = 550, Height = 230, Font = Font, Important = owner.IsImportant, ItemColor = owner.EventColor }; Controls.Add(list);
             list.Selected = SelectItem;
             detail = Caption("", 20, 332, 550); detail.Height = 42;
             Action("★ 선택 일정 강조", 20, 379, 170, delegate { if (selected != null) { owner.ToggleImportant(selected, palette.Selected); RefreshItems(); } });

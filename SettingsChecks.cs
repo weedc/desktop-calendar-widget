@@ -18,6 +18,26 @@ namespace TeamCalendar
         static void Check(bool value, string name, List<string> checks) { if (!value) throw new Exception(name); checks.Add(name); }
         public static void Run(List<string> checks)
         {
+            var owners = Fixture(); owners.accountCalendars[0].owner = "person@example.com";
+            owners.accountCalendars.Add(new CalendarSource { id = "second@group.calendar.google.com", owner = "PERSON@example.com", color = "#487F91" });
+            owners.accountCalendars.Add(new CalendarSource { id = "unassigned@group.calendar.google.com", color = "#487F91" });
+            string connectionBeforeColor = owners.ConnectionKey();
+            owners.SetSourceColor(owners.accountCalendars[0], "person@example.com", "#A35D73");
+            Check(owners.accountCalendars[1].color == "#A35D73" && owners.accountCalendars[2].color == "#487F91" && connectionBeforeColor == owners.ConnectionKey(), "owner colors group accounts case-insensitively without guessing unknown calendar ownership", checks);
+            var cached = new CalendarEvent { calendarId = "calendar@example.com", color = "#487F91" };
+            Check(Design.EventColor(owners, cached) == Design.Parse("#A35D73") && cached.color == "#487F91", "cached events immediately use current source colors without mutating data or synchronizing Google", checks);
+            var ownerDraft = new CalendarSettingsDraft(owners, new Settings(), true, false, Profiles());
+            ownerDraft.UseAccountCatalog(new AccountCatalog { profile = "demo", email = "demo@example.com", calendars = new List<CalendarSource> { new CalendarSource { id = "calendar@example.com", name = "Example" } } });
+            ownerDraft.Commit(owners);
+            Check(owners.accountCalendars[0].owner == "person@example.com" && owners.accountCalendars[0].color == "#A35D73", "account reconnection and staged settings preserve owner colors", checks);
+            using (var popup = new ThemeWindow("Synthetic popup", new System.Drawing.Size(320, 200)))
+            using (var child = new ThemeWindow("Synthetic child", new System.Drawing.Size(300, 180)))
+            using (var other = new Form())
+            {
+                child.Owner = popup; var handle = popup.Handle;
+                Check(!ThemeWindow.ShouldDismiss(popup, child) && ThemeWindow.ShouldDismiss(child, popup) && ThemeWindow.ShouldDismiss(popup, other) && ThemeWindow.ShouldDismiss(popup, null), "outside activation dismisses popups while owned child dialogs preserve their parent", checks);
+                Check(popup.Region != null && !popup.Region.IsVisible(0, 0) && popup.Region.IsVisible(160, 100), "popup rounded corners are applied on first handle creation", checks);
+            }
             var original = Fixture(); var appearance = new Settings { Opacity = 82, FontSize = 11, Desktop = true };
             var draft = new CalendarSettingsDraft(original, appearance, true, true, Profiles());
             draft.Work.accountCalendars[0].enabled = false; draft.Appearance.Opacity = 55; draft.Work.autoSyncEnabled = false;

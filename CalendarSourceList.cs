@@ -36,6 +36,7 @@ namespace TeamCalendar
         public string EmptyMessage = "선택할 캘린더가 없습니다.";
         public Action<string> Selected { get; set; }
         public Action<string, bool> CheckedChanged;
+        public Action<string> EditAppearance;
         public CalendarSourceList() { DoubleBuffered = true; BackColor = Design.Background; }
         public void SetItems(List<SourceChoice> choices)
         {
@@ -54,7 +55,9 @@ namespace TeamCalendar
                 checkbox.GotFocus += delegate { SelectItem(item.id); };
                 row.Click += delegate { SelectItem(item.id); }; caption.Click += delegate { SelectItem(item.id); };
                 foreach (Control control in new Control[] { row, checkbox, caption }) control.MouseWheel += delegate(object sender, MouseEventArgs e) { ScrollBy(e.Delta); };
-                row.Controls.Add(checkbox); row.Controls.Add(caption); rows.Add(row); Controls.Add(row);
+                var colorButton = new SoftButton { Text = "●", AccessibleName = item.name + " 색상 및 소유자", Width = 34, Height = 32, Top = 10, Fill = Design.Parse(item.color), ForeColor = Design.Text };
+                colorButton.Click += delegate { if (EditAppearance != null) EditAppearance(item.id); };
+                row.Controls.Add(checkbox); row.Controls.Add(caption); row.Controls.Add(colorButton); rows.Add(row); Controls.Add(row);
             }
             PositionRows(); ResumeLayout(); Invalidate();
         }
@@ -68,7 +71,7 @@ namespace TeamCalendar
         void PositionRows()
         {
             scroll = Math.Min(scroll, Math.Max(0, rows.Count * 60 - Height));
-            for (int i = 0; i < rows.Count; i++) { var row = rows[i]; row.SetBounds(0, i * 60 - scroll, Math.Max(1, Width - 10), 54); foreach (Control child in row.Controls) child.Width = Math.Max(30, row.Width - 36); }
+            for (int i = 0; i < rows.Count; i++) { var row = rows[i]; row.SetBounds(0, i * 60 - scroll, Math.Max(1, Width - 10), 54); foreach (Control child in row.Controls) { if (child is SoftButton) { child.Left = row.Width - 44; child.Width = 34; } else child.Width = Math.Max(30, row.Width - 76); } }
         }
         protected override void OnMouseWheel(MouseEventArgs e) { ScrollBy(e.Delta); }
         protected override void OnResize(EventArgs e) { base.OnResize(e); PositionRows(); Invalidate(); }

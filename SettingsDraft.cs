@@ -19,7 +19,7 @@ namespace TeamCalendar
             Appearance.Desktop = desktop; Startup = startup;
             Profiles = (profiles ?? ExistingChromeProfile.List()).ToList();
         }
-        static List<CalendarSource> CopySources(List<CalendarSource> values) { return values.Select(c => new CalendarSource { id = c.id, name = c.name, color = c.color, enabled = c.enabled }).ToList(); }
+        static List<CalendarSource> CopySources(List<CalendarSource> values) { return values.Select(c => new CalendarSource { id = c.id, name = c.name, owner = c.owner, color = c.color, enabled = c.enabled }).ToList(); }
         static void CopyOptions(FeatureState from, FeatureState to)
         {
             to.calendars = CopySources(from.calendars); to.accountCalendars = CopySources(from.accountCalendars);
@@ -44,7 +44,7 @@ namespace TeamCalendar
             {
                 var source = g.First(); CalendarSource old;
                 bool known = previous.TryGetValue(source.id, out old);
-                return new CalendarSource { id = source.id, name = known ? old.name : source.name, color = known ? old.color : source.color, enabled = known && old.enabled };
+                return new CalendarSource { id = source.id, name = known ? old.name : source.name, owner = known ? old.owner : source.owner, color = known ? old.color : source.color, enabled = known && old.enabled };
             }).ToList();
             Work.accountProfile = catalog.profile; Work.accountEmail = catalog.email;
         }

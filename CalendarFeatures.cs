@@ -41,7 +41,7 @@ namespace TeamCalendar
         void ShowCalendarManager(bool initialSetup)
         {
             if (calendarManager != null && !calendarManager.IsDisposed) { calendarManager.Activate(); return; }
-            string before = App.Json.Serialize(new { features.calendars, features.chromeProfile, features.googleUser, features.connectionMode, features.accountCalendars, features.accountProfile, features.accountEmail });
+            string before = features.ConnectionKey();
             var dialog = new CalendarManager(features, settings, pinned, StartupRegistration.ForSetup(features.setupCompleted), ShowCodexDialog, TestDailySummary, initialSetup);
             calendarManager = dialog;
             dialog.FormClosed += delegate
@@ -54,7 +54,7 @@ namespace TeamCalendar
                     if (pinned != dialog.DesktopValue) Pin(dialog.DesktopValue);
                     StartupRegistration.Set(dialog.StartupValue);
                     features.Save(); Save();
-                    if (dialog.ConnectionChanged || before != App.Json.Serialize(new { features.calendars, features.chromeProfile, features.googleUser, features.connectionMode, features.accountCalendars, features.accountProfile, features.accountEmail })) ReconfigureCalendars();
+                    if (dialog.ConnectionChanged || before != features.ConnectionKey()) ReconfigureCalendars();
                     else { UpdateCalendarTitle(); Invalidate(); }
                     if (dialog.OpenCodexAfterApply) BeginInvoke((Action)ShowCodexDialog);
                 }

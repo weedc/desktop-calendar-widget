@@ -74,6 +74,8 @@ namespace TeamCalendar
             var mark = EmojiData.Assign(features, item, App.Str(args, "icon"), App.Str(args, "activity"), App.Str(args, "label"), App.Str(args, "project"), false);
             SaveFeatures(); return mark;
         }
+        protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); if (Width < 1 || Height < 1) return; using (var path = Design.Round(new RectangleF(0, 0, Width, Height), Design.WindowRadius)) { var old = Region; Region = new Region(path); if (old != null) old.Dispose(); } }
+        internal Color EventColor(CalendarEvent item) { return Design.EventColor(features, item); }
         internal EmojiMark EventEmoji(CalendarEvent item) { return EmojiData.Resolve(features, item); }
         internal void SetManualEmoji(CalendarEvent item, string icon, string label, string project, bool wholeProject)
         {
@@ -86,7 +88,7 @@ namespace TeamCalendar
             if (wholeProject) features.projectEmojis.RemoveAll(p => p.calendarId == item.calendarId && string.Equals(p.project, project, StringComparison.OrdinalIgnoreCase));
             SaveFeatures();
         }
-        internal void ShowEmojiEditor(CalendarEvent item) { if (emojiDialog != null && !emojiDialog.IsDisposed) emojiDialog.Close(); emojiDialog = new EmojiDialog(this, item); emojiDialog.Show(); }
+        internal void ShowEmojiEditor(CalendarEvent item) { if (emojiDialog != null && !emojiDialog.IsDisposed) emojiDialog.Close(); emojiDialog = new EmojiDialog(this, item); if (dayDetails != null && !dayDetails.IsDisposed && dayDetails.Visible) emojiDialog.Show(dayDetails); else emojiDialog.Show(); }
         void DrawStickers(Graphics graphics, List<CalendarEvent> source, Rectangle cell, DateTime day)
         {
             int size = EmojiData.StickerSize(cell.Height), step = size + 3;
@@ -99,7 +101,7 @@ namespace TeamCalendar
                 for (int i = 0; i < shown; i++)
                 {
                     var item = items[i]; var bounds = new Rectangle(cell.X + 5 + i % columns * step, cell.Y + 29 + i / columns * step, size, size);
-                    using (var path = Design.Round(bounds, 7)) using (var brush = new SolidBrush(Color.FromArgb(IsImportant(item) ? 220 : 100, Design.Parse(item.color)))) graphics.FillPath(brush, path);
+                    using (var path = Design.Round(bounds, 7)) using (var brush = new SolidBrush(Color.FromArgb(IsImportant(item) ? 220 : 100, EventColor(item)))) graphics.FillPath(brush, path);
                     TextRenderer.DrawText(graphics, EmojiData.FirstIcon(EventEmoji(item).icon), font, bounds, ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     if (IsImportant(item)) TextRenderer.DrawText(graphics, "★", countFont, new Rectangle(bounds.Right - 9, bounds.Top - 4, 12, 12), Color.FromArgb(255, 220, 120), TextFormatFlags.NoPadding);
                     hits.Add(new EventHit { bounds = bounds, item = item, day = day });

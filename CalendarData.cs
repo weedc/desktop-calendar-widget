@@ -12,7 +12,7 @@ namespace TeamCalendar
 {
     public class CalendarSource
     {
-        public string id = "", name = "", color = "#68BCCB";
+        public string id = "", name = "", owner = "", color = "#68BCCB";
         public bool enabled = true;
     }
     public class LocalNote
@@ -38,6 +38,14 @@ namespace TeamCalendar
         public List<CalendarSource> ActiveCalendars() { return ConnectionSources().GroupBy(c => c.id, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList(); }
         public string ActiveProfile() { return connectionMode == "account" ? accountProfile : chromeProfile; }
         public string ActiveUser() { return connectionMode == "account" ? accountEmail : googleUser; }
+        public string ConnectionKey() { return App.Json.Serialize(new { mode = connectionMode, profile = ActiveProfile(), email = ActiveUser(), sources = ActiveCalendars().Where(c => c.enabled).Select(c => c.id).OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray() }); }
+        public static string OwnerKey(CalendarSource source) { return !string.IsNullOrWhiteSpace(source.owner) ? source.owner.Trim() : source.id.Contains("@") && !source.id.EndsWith(".calendar.google.com", StringComparison.OrdinalIgnoreCase) ? source.id : ""; }
+        public void SetSourceColor(CalendarSource source, string owner, string color)
+        {
+            source.owner = (owner ?? "").Trim(); source.color = color;
+            string key = OwnerKey(source);
+            if (key != "") foreach (var item in ConnectionSources().Where(c => string.Equals(OwnerKey(c), key, StringComparison.OrdinalIgnoreCase))) item.color = color;
+        }
         public List<LocalNote> notes = new List<LocalNote>();
         public List<Accent> highlights = new List<Accent>();
         public List<Accent> days = new List<Accent>();
@@ -112,12 +120,15 @@ namespace TeamCalendar
     static class Design
     {
         public static readonly Color Background = Color.FromArgb(22, 43, 56), Panel = Color.FromArgb(30, 55, 70), Text = Color.FromArgb(231, 243, 248), Muted = Color.FromArgb(158, 186, 201);
+        public const int WindowRadius = 14, ControlRadius = 8;
+        public static readonly Color Header = Color.FromArgb(29, 51, 65), Border = Color.FromArgb(64, 94, 110), Button = Color.FromArgb(47, 79, 96);
         public static readonly string[] Colors = { "#487F91", "#536CA2", "#8A649E", "#A35D73", "#A47B45", "#628760" };
         public static Color Parse(string value)
         {
             try { if (Regex.IsMatch(value ?? "", "^#[0-9a-fA-F]{6}$")) return ColorTranslator.FromHtml(value); } catch { }
             return ColorTranslator.FromHtml(Colors[0]);
         }
+        public static Color EventColor(FeatureState state, CalendarEvent item) { var source = state.ActiveCalendars().FirstOrDefault(c => c.id == item.calendarId); return Parse(item.isNote || source == null ? item.color : source.color); }
         public static GraphicsPath Round(RectangleF rect, float radius)
         {
             float d = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height)); var path = new GraphicsPath();
